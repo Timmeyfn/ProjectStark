@@ -33,6 +33,15 @@ Then in the Reboot Launcher:
 2. Build the project with Visual Studio 2022 (**Release | x64**).
 3. Use your built DLL the same way as above: Settings → Internal files → Game server type **Custom**, and point "Game server" at the built `x64\Release\Project Reboot 3.0.dll`.
 
+## Planned
+
+- [ ] Project Stark Launcher (a themed version of Reboot Launcher) that you start from a desktop shortcut
+- [ ] Lobby locker saves between game restarts (skin, pickaxe, glider, emotes)
+- [ ] Your locker skin carries into the match instead of turning into a default
+- [ ] Bot gun animations (weapons properly equipped on the bots)
+- [ ] Party/join system so friends can join the host without Radmin VPN
+- [ ] Client settings: Edit/Reset on release (Edit only / Edit & Reset / Reset only), build and edit sensitivity
+
 ## Contributing
 
 Contributions are welcome! Feel free to create pull requests or report issues on the GitHub repository.
