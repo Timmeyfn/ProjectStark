@@ -1280,6 +1280,48 @@ public:
 		return NewName;
 	}
 
+	// Spawn through Fortnite's own bot spawner. This sets up the pawn, its Phoebe controller,
+	// playerstate and possession the way the game expects (what OGS does).
+	bool SpawnWithBotMutator(const FTransform& SpawnTransform, AActor* SpawnLocator)
+	{
+		auto GameMode = Cast<AFortGameModeAthena>(GetWorld()->GetGameMode());
+
+		if (!GameMode || !SpawnLocator)
+			return false;
+
+		auto BotManager = GameMode->GetServerBotManager();
+		auto Mutator = BotManager ? BotManager->GetCachedBotMutator() : nullptr;
+
+		if (!Mutator)
+		{
+			static bool bWarned = false;
+			if (!bWarned) { bWarned = true; LOG_WARN(LogBots, "No bot mutator, using manual bot spawning."); }
+			return false;
+		}
+
+		FRotator Rotation = SpawnTransform.Rotation.Rotator();
+		auto NewPawn = (AFortPlayerPawnAthena*)Mutator->SpawnBot(PawnClass, SpawnLocator, SpawnTransform.Translation, Rotation, false);
+
+		if (!NewPawn || !NewPawn->GetController())
+		{
+			LOG_WARN(LogBots, "Bot mutator SpawnBot failed (pawn {}), using manual bot spawning.", NewPawn != nullptr);
+			if (NewPawn) NewPawn->K2_DestroyActor();
+			return false;
+		}
+
+		Pawn = NewPawn;
+		Controller = (AController*)NewPawn->GetController();
+		PawnRef.Set(Pawn);
+		ControllerRef.Set(Controller);
+
+		if (!BotSettings::bUseEpicAI)
+			BotEngine::StopEpicBrain(Controller);
+
+		static bool bLogged = false;
+		if (!bLogged) { bLogged = true; LOG_INFO(LogBots, "Spawning bots through Fortnite's bot mutator."); }
+		return true;
+	}
+
 	bool SpawnPawnAndController(const FTransform& SpawnTransform)
 	{
 		auto World = GetWorld();
@@ -1339,6 +1381,45 @@ public:
 		return true;
 	}
 
+	void ApplyHeroToCharacterData(UObject* HeroType)
+	{
+		static auto CharacterDataOffset = PlayerState->GetOffset("CharacterData", false);
+		static auto PartsOffset = FindOffsetStruct("/Script/FortniteGame.CustomCharacterData", "Parts", false);
+		static auto SpecializationsOffset = HeroType->GetOffset("Specializations", false);
+		static auto FortHeroSpecializationClass = FindObject<UClass>(L"/Script/FortniteGame.FortHeroSpecialization");
+		static auto CustomCharacterPartClass = FindObject<UClass>(L"/Script/FortniteGame.CustomCharacterPart");
+
+		if (CharacterDataOffset == -1 || PartsOffset == -1 || SpecializationsOffset == -1)
+			return;
+
+		auto Parts = (UObject**)(__int64(PlayerState) + CharacterDataOffset + PartsOffset);
+		auto& Specializations = HeroType->Get<TArray<TSoftObjectPtr<UObject>>>(SpecializationsOffset);
+
+		for (int i = 0; i < Specializations.Num(); i++)
+		{
+			auto Specialization = Specializations.at(i).Get(FortHeroSpecializationClass, true);
+			if (!Specialization) continue;
+
+			static auto CharacterPartsOffset = Specialization->GetOffset("CharacterParts");
+			auto& CharacterParts = Specialization->Get<TArray<TSoftObjectPtr<UObject>>>(CharacterPartsOffset);
+
+			for (int z = 0; z < CharacterParts.Num(); z++)
+			{
+				auto Part = CharacterParts.at(z, GetSoftObjectSize()).Get(CustomCharacterPartClass, true);
+				if (!Part) continue;
+
+				static auto PartTypeOffset = Part->GetOffset("CharacterPartType", false);
+				if (PartTypeOffset == -1) continue;
+
+				uint8 Type = Part->Get<uint8>(PartTypeOffset);
+				if (Type < 7) Parts[Type] = Part; // EFortCustomPartType::NumTypes == 7
+			}
+		}
+
+		static auto OnRep_CharacterDataFn = BotFindFn(L"/Script/FortniteGame.FortPlayerState.OnRep_CharacterData");
+		if (OnRep_CharacterDataFn) PlayerState->ProcessEvent(OnRep_CharacterDataFn);
+	}
+
 	void ApplyCosmetics()
 	{
 		static auto HeroTypeOffset = PlayerState->GetOffset("HeroType", false);
@@ -1371,7 +1452,10 @@ public:
 		}
 
 		if (HeroType)
+		{
 			ApplyHID(Pawn, HeroType, false);
+			ApplyHeroToCharacterData(HeroType);
+		}
 	}
 
 	void SetupNewPawn()
@@ -1424,7 +1508,7 @@ public:
 		}
 	}
 
-	bool Initialize(const FTransform& SpawnTransform)
+	bool Initialize(const FTransform& SpawnTransform, AActor* SpawnLocator = nullptr)
 	{
 		auto GameState = Cast<AFortGameStateAthena>(GetWorld()->GetGameState());
 		auto GameMode = Cast<AFortGameModeAthena>(GetWorld()->GetGameMode());
@@ -1437,7 +1521,7 @@ public:
 
 		int PlayersLeftBefore = GameState->GetPlayersLeft();
 
-		if (!SpawnPawnAndController(SpawnTransform))
+		if (!SpawnWithBotMutator(SpawnTransform, SpawnLocator) && !SpawnPawnAndController(SpawnTransform))
 			return false;
 
 		PlayerState = Cast<AFortPlayerStateAthena>(Controller->GetPlayerState());
@@ -1903,7 +1987,7 @@ namespace Bots
 	{
 		auto Bot = new PlayerBot();
 
-		if (!Bot->Initialize(SpawnTransform))
+		if (!Bot->Initialize(SpawnTransform, InSpawnLocator))
 		{
 			delete Bot;
 			return nullptr;
