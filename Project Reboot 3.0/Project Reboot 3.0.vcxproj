@@ -303,6 +303,8 @@
     <ClInclude Include="BitArray.h" />
     <ClInclude Include="botnames.h" />
     <ClInclude Include="bots.h" />
+    <ClInclude Include="botsettings.h" />
+    <ClInclude Include="starkclient.h" />
     <ClInclude Include="BP_IslandScripting.h" />
     <ClInclude Include="BuildingActor.h" />
     <ClInclude Include="BuildingContainer.h" />

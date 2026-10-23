@@ -447,6 +447,7 @@ class _LaunchButtonState extends State<LaunchButton> {
       }
       if(!host){
         await _injectOrShowError(GameDll.console, host);
+        await _injectStarkClient();
         _onGameClientInjected();
       }else {
         final gameServerPort = int.tryParse(_dllController.gameServerPort.text);
@@ -759,6 +760,37 @@ class _LaunchButtonState extends State<LaunchButton> {
           );
           break;
       }
+    }
+  }
+
+  // Project Stark: inject a copy of the game server DLL named StarkClient.dll into your game,
+  // which turns on the client features (build/edit sensitivity). Never stops the game if it fails.
+  Future<void> _injectStarkClient() async {
+    final instance = _gameController.instance.value;
+    if (instance == null) {
+      return;
+    }
+
+    try {
+      final (serverDll, _) = _dllController.getInjectableData(instance.version, GameDll.gameServer);
+      if (!serverDll.existsSync()) {
+        log("[GAME] No game server dll, skipping StarkClient");
+        return;
+      }
+
+      final clientDll = File("${serverDll.parent.path}\\StarkClient.dll");
+      try {
+        await serverDll.copy(clientDll.path);
+      } catch (error) {
+        log("[GAME] Couldn't update StarkClient.dll (probably still in use): $error");
+      }
+
+      if (clientDll.existsSync()) {
+        await injectDll(instance.gamePid, clientDll);
+        log("[GAME] Injected StarkClient");
+      }
+    } catch (error) {
+      log("[GAME] Cannot inject StarkClient: $error");
     }
   }
 

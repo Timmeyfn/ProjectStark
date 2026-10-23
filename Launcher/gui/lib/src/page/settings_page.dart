@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:math';
 
 import 'package:fluent_ui/fluent_ui.dart' hide FluentIcons;
@@ -48,8 +49,83 @@ class _SettingsPageState extends AbstractPageState<SettingsPage> {
   @override
   Widget? get button => null;
 
+  // Project Stark client settings (read live by StarkClient.dll inside your game)
+  double? _buildSens;
+  double? _editSens;
+
+  File get _starkSettingsFile => File("${Platform.environment['LOCALAPPDATA']}\\ProjectStark\\client_settings.ini");
+
+  void _loadStarkSettings() {
+    if (_buildSens != null) return;
+    _buildSens = 1.0;
+    _editSens = 1.0;
+    try {
+      for (final line in _starkSettingsFile.readAsLinesSync()) {
+        final parts = line.split('=');
+        if (parts.length != 2) continue;
+        final value = double.tryParse(parts[1].trim());
+        if (value == null) continue;
+        if (parts[0].trim() == 'BuildSensitivity') _buildSens = value;
+        if (parts[0].trim() == 'EditSensitivity') _editSens = value;
+      }
+    } catch (_) {}
+  }
+
+  void _saveStarkSettings() {
+    try {
+      _starkSettingsFile.parent.createSync(recursive: true);
+      _starkSettingsFile.writeAsStringSync(
+          "[Client]\r\nBuildSensitivity=${_buildSens!.toStringAsFixed(2)}\r\nEditSensitivity=${_editSens!.toStringAsFixed(2)}\r\n");
+    } catch (_) {}
+  }
+
+  Widget _starkSlider(double value, void Function(double) onChanged) => Row(
+    children: [
+      Expanded(
+        child: Slider(
+          min: 0.1,
+          max: 2.0,
+          divisions: 38,
+          value: value.clamp(0.1, 2.0),
+          onChanged: (newValue) {
+            setState(() => onChanged(double.parse(newValue.toStringAsFixed(2))));
+            _saveStarkSettings();
+          },
+        ),
+      ),
+      const SizedBox(width: 8.0),
+      SizedBox(width: 44.0, child: Text("${(value * 100).round()}%")),
+    ],
+  );
+
+  SettingTile get _starkClient {
+    _loadStarkSettings();
+    return SettingTile(
+      icon: Icon(FluentIcons.cursor_24_regular),
+      title: const Text("Project Stark"),
+      subtitle: const Text("Build and edit sensitivity (works while you play)"),
+      children: [
+        SettingTile(
+          icon: Icon(FluentIcons.building_24_regular),
+          title: const Text("Build sensitivity"),
+          subtitle: const Text("Mouse sensitivity while holding building pieces"),
+          contentWidth: 260.0,
+          content: _starkSlider(_buildSens!, (value) => _buildSens = value),
+        ),
+        SettingTile(
+          icon: Icon(FluentIcons.edit_24_regular),
+          title: const Text("Edit sensitivity"),
+          subtitle: const Text("Mouse sensitivity while editing"),
+          contentWidth: 260.0,
+          content: _starkSlider(_editSens!, (value) => _editSens = value),
+        ),
+      ],
+    );
+  }
+
   @override
   List<Widget> get settings => [
+    _starkClient,
     _language,
     _theme,
     _internalFiles,

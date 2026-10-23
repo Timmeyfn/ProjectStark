@@ -48,6 +48,7 @@
 #include "FortAIEncounterInfo.h"
 #include "FortServerBotManagerAthena.h"
 #include "botnames.h"
+#include "starkclient.h"
 
 /*
 
@@ -903,8 +904,25 @@ bool ReplicateActorHook(UActorChannel* Channel)
 
 // #define CLIENT_ONLY // only console reboot
 
+static HMODULE GStarkModule = nullptr;
+
+// Project Stark: the launcher injects a copy of this DLL called StarkClient.dll into your game (the client)
+static bool IsStarkClient()
+{
+    char Path[MAX_PATH] = {};
+    GetModuleFileNameA(GStarkModule, Path, MAX_PATH);
+    std::string Name = Path;
+    for (auto& c : Name) c = (char)tolower((unsigned char)c);
+    return Name.find("starkclient") != std::string::npos;
+}
+
 DWORD WINAPI Main(LPVOID)
 {
+    const bool bStarkClient = IsStarkClient();
+
+    if (bStarkClient)
+        GStarkLogName = "stark_client.log";
+
 #ifndef CLIENT_ONLY
     InitLogger();
 
@@ -940,6 +958,12 @@ DWORD WINAPI Main(LPVOID)
     Addresses::Print();
 
     bEnableRebooting = Addresses::RebootingDelegate && Addresses::FinishResurrection && Addresses::GetSquadIdForCurrentPlayer && false;
+
+    if (bStarkClient)
+    {
+        StarkClient::Start();
+        return 0;
+    }
 
 #ifdef CLIENT_ONLY // CONSOLE ONLY (FOR CLIENT)
     SetConsoleTitleA("Console");
@@ -1856,6 +1880,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID lpReserved)
     switch (reason)
     {
     case DLL_PROCESS_ATTACH:
+        GStarkModule = hModule;
         CreateThread(0, 0, Main, 0, 0, 0);
         break;
     case DLL_PROCESS_DETACH:

@@ -37,6 +37,8 @@ inline void MakeLogger(const std::string& LoggerName)
     logger->flush_on(spdlog::level::level_enum::info);
 }
 
+inline std::string GStarkLogName = "reboot.log"; // "stark_client.log" when running inside your game
+
 inline void InitLogger()
 {
     // FreeConsole();
@@ -59,7 +61,7 @@ inline void InitLogger()
     
 #ifdef ENABLE_SPD_LOG
 
-    std::string logName = "reboot.log"; // GenerateLogFileName();
+    std::string logName = GStarkLogName; // GenerateLogFileName();
 
     sinks.emplace_back(std::make_shared<spdlog::sinks::stdout_color_sink_mt>())->set_pattern("[%D-%T] %n: %^%v%$");
     sinks.emplace_back(std::make_shared<spdlog::sinks::basic_file_sink_mt>(logName, true))->set_pattern("[%D-%T] %n: %l: %v");

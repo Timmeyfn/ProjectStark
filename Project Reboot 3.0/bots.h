@@ -826,6 +826,7 @@ namespace BotWorld
 
 	inline EAthenaGamePhase LastPhase = EAthenaGamePhase::None;
 	inline float AircraftPhaseStartTime = -1.f;
+	inline float SafeZonesStartTime = -1.f;
 
 	inline bool bRealFireVerified = false;     // we saw a bot's real gun consume ammo
 	inline bool bUseSimulatedShots = false;    // real firing doesn't work for AI here, so simulate hits
@@ -3247,10 +3248,36 @@ namespace Bots
 
 		Bot->NextStormTick = Now + 1.f; // storm ticks once per second
 
+		// Like the real storm: nothing happens for the first while after the bus drops
+		if (BotWorld::SafeZonesStartTime < 0.f || Now - BotWorld::SafeZonesStartTime < 90.f)
+			return;
+
+		// Ask Fortnite itself whether this pawn is inside the safe zone, when it tells us
+		static auto InsideOffset = Bot->Pawn->GetOffset("bIsInsideSafeZone", false);
+
+		if (InsideOffset != -1)
+		{
+			static auto InsideMask = GetFieldMask(Bot->Pawn->GetProperty("bIsInsideSafeZone"));
+
+			if (Bot->Pawn->ReadBitfieldValue(InsideOffset, InsideMask))
+				return;
+		}
+
 		auto Zone = GetSafeZone();
 
-		if (!Zone.bValid || BotMath::Dist2D(Bot->Location(), Zone.Center) <= Zone.Radius)
+		// Only the circle that's actually on the map right now (the bigger of where it was and where it's going)
+		float Radius = (std::max)(Zone.Radius, Zone.NextRadius);
+
+		if (!Zone.bValid || BotMath::Dist2D(Bot->Location(), Zone.Center) <= Radius)
 			return;
+
+		static bool bLoggedStorm = false;
+		if (!bLoggedStorm)
+		{
+			bLoggedStorm = true;
+			LOG_INFO(LogBots, "Storm hurting bot {}: dist {:.0f} radius {:.0f} next {:.0f} phase {}", Bot->Name,
+				BotMath::Dist2D(Bot->Location(), Zone.Center), Zone.Radius, Zone.NextRadius, Zone.Phase);
+		}
 
 		static const float DamagePerPhase[] = { 1.f, 1.f, 2.f, 5.f, 8.f, 10.f, 10.f, 10.f, 10.f, 10.f };
 		PlayerBot::ApplyDamageToPawn(Bot->Pawn, DamagePerPhase[(std::min)((std::max)(Zone.Phase, 0), 9)], nullptr, nullptr);
@@ -3440,6 +3467,7 @@ namespace Bots
 		BotWorld::bBuiltChestCache = false;
 		BotWorld::LastPhase = EAthenaGamePhase::None;
 		BotWorld::AircraftPhaseStartTime = -1.f;
+		BotWorld::SafeZonesStartTime = -1.f;
 		BotWorld::bWonAnnounced = false;
 		BotSettings::AliveBots = 0;
 		InitBotNames();
@@ -3486,6 +3514,9 @@ namespace Bots
 				BotWorld::AircraftPhaseStartTime = Now;
 				BuildChestCache();
 			}
+
+			if (Phase >= EAthenaGamePhase::SafeZones && BotWorld::SafeZonesStartTime < 0.f)
+				BotWorld::SafeZonesStartTime = Now;
 
 			if (Phase >= EAthenaGamePhase::SafeZones && !BotWorld::bBuiltChestCache)
 				BuildChestCache();

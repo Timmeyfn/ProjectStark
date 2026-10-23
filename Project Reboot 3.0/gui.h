@@ -351,15 +351,11 @@ static inline void StaticUI()
 		if (!bStartedBus)
 		{
 			// Bots join the warmup lobby. Press the button while in warmup, before the bus starts.
-			static int BotsToAdd = 50;
+			static int BotsToAdd = 20;
 
-			if (ImGui::InputInt("Bots to add", &BotsToAdd))
-			{
-				if (BotsToAdd < 0) BotsToAdd = 0;
-				if (BotsToAdd > 99) BotsToAdd = 99;
-			}
+			ImGui::SliderInt("Bots to add", &BotsToAdd, 1, 99);
 
-			if (ImGui::Button("Spawn bots") && BotsToAdd > 0)
+			if (ImGui::Button(("Spawn " + std::to_string(BotsToAdd) + " bots").c_str()))
 			{
 				BotSettings::PendingBotsToSpawn = BotsToAdd; // spawned on the game thread
 			}
