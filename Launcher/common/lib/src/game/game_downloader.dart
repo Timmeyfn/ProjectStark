@@ -513,7 +513,7 @@ Future<bool> downloadRebootDll(File file, String url, bool aboveS20) async {
     try {
         var response = await http.get(Uri.parse(url));
         if(response.statusCode != 200) {
-            response = await http.get(Uri.parse(aboveS20 ? _kRebootAboveS20FallbackDownloadUrl : _kRebootBelowS20FallbackDownloadUrl));
+            response = await http.get(Uri.parse(aboveS20 ? kRebootAboveS20DownloadUrl : kRebootBelowS20DownloadUrl));
             if(response.statusCode != 200) {
                 throw "status code ${response.statusCode}";
             }

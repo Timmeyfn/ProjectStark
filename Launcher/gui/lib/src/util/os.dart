@@ -44,7 +44,7 @@ Future<String?> openFilePicker(String extension) async {
 }
 
 bool get isDarkMode =>
-    SchedulerBinding.instance.platformDispatcher.platformBrightness.isDark;
+    SchedulerBinding.instance.platformDispatcher.platformBrightness == Brightness.dark;
 
 extension WindowManagerExtension on WindowManager {
   Future<void> maximizeOrRestore() async => await windowManager.isMaximized() ? windowManager.restore() : windowManager.maximize();
