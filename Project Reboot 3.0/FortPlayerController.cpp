@@ -223,7 +223,25 @@ void AFortPlayerController::ApplyCosmeticLoadout()
 		return;
 	}
 
+	// Project Stark: put the skin from your locker on your character (like OGS), so you don't turn into a default
+	if (auto PCLoadout = GetCosmeticLoadoutOffset() != -1 ? this->GetCosmeticLoadout() : nullptr)
+	{
+		auto LockerCharacter = PCLoadout->GetCharacter();
+		LOG_INFO(LogCosmetics, "Locker skin: {}", LockerCharacter ? LockerCharacter->GetName() : "none (the launcher didn't send one)");
+
+		if (auto PawnLoadout = PawnAsFort->GetCosmeticLoadout())
+		{
+			memcpy(PawnLoadout, PCLoadout, FFortAthenaLoadout::GetStructSize());
+
+			static auto OnRep_CosmeticLoadoutFn = FindObject<UFunction>(L"/Script/FortniteGame.FortPlayerPawn.OnRep_CosmeticLoadout");
+			if (OnRep_CosmeticLoadoutFn) PawnAsFort->ProcessEvent(OnRep_CosmeticLoadoutFn);
+		}
+	}
+
 	UFortKismetLibrary::StaticClass()->ProcessEvent(UpdatePlayerCustomCharacterPartsVisualizationFn, &PlayerStateAsFort);
+
+	static auto OnRep_CharacterDataFn = FindObject<UFunction>(L"/Script/FortniteGame.FortPlayerState.OnRep_CharacterData");
+	if (OnRep_CharacterDataFn) PlayerStateAsFort->ProcessEvent(OnRep_CharacterDataFn);
 
 	PlayerStateAsFort->ForceNetUpdate();
 	PawnAsFort->ForceNetUpdate();
