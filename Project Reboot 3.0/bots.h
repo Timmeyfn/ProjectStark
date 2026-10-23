@@ -1209,6 +1209,7 @@ public:
 	int AmmoAtFireStart = -1;
 	float FireStartTime = 0.f;
 	float NextStormTick = 0.f;
+	float DiagLastHealth = -1.f; // for logging unexplained damage
 
 	// Healing
 	float HealUntil = 0.f;
@@ -2607,6 +2608,10 @@ namespace Bots
 			bool bSkydiving = BotEngine::IsSkydiving(Bot->Pawn);
 			bool bParachute = BotEngine::IsParachuteOpen(Bot->Pawn);
 
+			// Don't let the game count the whole drop from the bus as one big fall
+			if (bSkydiving || bParachute)
+				BotEngine::ResetFallingHeight(Bot->Pawn);
+
 			// Glider time
 			if (!Bot->bOpenedParachute && Bot->LastAltitude < BotMath::RandF(3500.f, 5000.f))
 			{
@@ -3311,8 +3316,27 @@ namespace Bots
 		// From here on we need a living pawn
 		bool bPawnValid = Bot->PawnRef.IsValid() && IsActorUsable(Bot->Pawn);
 
+		// Diagnostics: log any damage we didn't deal ourselves, with what the bot was doing
+		if (bPawnValid)
+		{
+			float Health = Bot->Pawn->GetHealth();
+
+			if (Bot->DiagLastHealth > 0.f && Health < Bot->DiagLastHealth - 0.5f && Now - Bot->LastDamagedTime > 0.5f)
+			{
+				auto Vel = BotEngine::GetVelocity(Bot->Pawn);
+				LOG_INFO(LogBots, "[Dmg] {} lost {:.0f} hp (now {:.0f}) state {} alt {:.0f} velZ {:.0f} speed {:.0f} skydiving {} parachute {} movemode {}",
+					Bot->Name, Bot->DiagLastHealth - Health, Health, (int)Bot->State, Bot->LastAltitude, Vel.Z, BotMath::Size2D(Vel),
+					BotEngine::IsSkydiving(Bot->Pawn), BotEngine::IsParachuteOpen(Bot->Pawn), (int)BotEngine::GetMovementMode(Bot->Pawn));
+			}
+
+			Bot->DiagLastHealth = Health;
+		}
+
 		if (!bPawnValid || Bot->Pawn->GetHealth() <= 0.f)
 		{
+			LOG_INFO(LogBots, "[Death] {} pawn valid {} health {:.0f} state {} alt {:.0f}", Bot->Name, bPawnValid,
+				bPawnValid ? Bot->Pawn->GetHealth() : -1.f, (int)Bot->State, Bot->LastAltitude);
+
 			if (Phase <= EAthenaGamePhase::Warmup)
 			{
 				Bot->State = EBotState::WaitingToRespawn;
