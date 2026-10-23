@@ -1420,8 +1420,63 @@ public:
 		if (OnRep_CharacterDataFn) PlayerState->ProcessEvent(OnRep_CharacterDataFn);
 	}
 
+	// Give the bot a random real skin the way OGS does: set the controller's and pawn's
+	// cosmetic loadout Character, OnRep it, and put the skin's parts in CharacterData.
+	bool ApplyRandomCID()
+	{
+		static std::vector<UObject*> CIDs;
+
+		if (CIDs.empty())
+		{
+			static auto CIDClass = FindObject<UClass>(L"/Script/FortniteGame.AthenaCharacterItemDefinition");
+
+			for (auto CID : GetAllObjectsOfClass(CIDClass))
+			{
+				if (!CID) continue;
+				auto CIDName = CID->GetName();
+
+				if (CIDName.starts_with("CID_") && !ContainsI(CIDName, "NPC") && !ContainsI(CIDName, "Default") && !ContainsI(CIDName, "Henchman"))
+					CIDs.push_back(CID);
+			}
+
+			LOG_INFO(LogBots, "Bots can wear {} skins.", CIDs.size());
+		}
+
+		if (CIDs.empty())
+			return false;
+
+		auto CID = CIDs.at(BotMath::RandI(0, (int)CIDs.size() - 1));
+
+		static auto LoadoutBCOffset = Controller->GetOffset("CosmeticLoadoutBC", false);
+		if (LoadoutBCOffset != -1)
+			((FFortAthenaLoadout*)(__int64(Controller) + LoadoutBCOffset))->GetCharacter() = CID;
+
+		if (auto PawnLoadout = Pawn->GetCosmeticLoadout())
+		{
+			PawnLoadout->GetCharacter() = CID;
+			static auto OnRep_CosmeticLoadoutFn = BotFindFn(L"/Script/FortniteGame.FortPlayerPawn.OnRep_CosmeticLoadout");
+			if (OnRep_CosmeticLoadoutFn) Pawn->ProcessEvent(OnRep_CosmeticLoadoutFn);
+		}
+
+		static auto HeroDefinitionOffset = CID->GetOffset("HeroDefinition", false);
+		auto HeroDefinition = HeroDefinitionOffset != -1 ? CID->Get(HeroDefinitionOffset) : nullptr;
+
+		if (HeroDefinition)
+		{
+			static auto HeroTypeOffset = PlayerState->GetOffset("HeroType", false);
+			if (HeroTypeOffset != -1) PlayerState->Get(HeroTypeOffset) = HeroDefinition;
+			ApplyHID(Pawn, HeroDefinition, false);
+			ApplyHeroToCharacterData(HeroDefinition);
+		}
+
+		return true;
+	}
+
 	void ApplyCosmetics()
 	{
+		if (ApplyRandomCID())
+			return;
+
 		static auto HeroTypeOffset = PlayerState->GetOffset("HeroType", false);
 
 		if (HeroTypeOffset == -1)
@@ -2535,6 +2590,12 @@ namespace Bots
 
 			if (BotMath::Dist2D(MyLocation, Bot->LandingTarget) > 300.f)
 				BotEngine::AddMovementInput(Bot->Pawn, Direction, 1.f);
+		}
+
+		// Dive instead of floating down slowly (like holding forward/down as a player)
+		if (Bot->State == EBotState::Skydive)
+		{
+			BotEngine::AddMovementInput(Bot->Pawn, FVector(0, 0, -1.f), 1.f);
 		}
 	}
 
