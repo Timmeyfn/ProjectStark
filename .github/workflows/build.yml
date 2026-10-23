@@ -38,10 +38,19 @@ jobs:
           channel: stable
       - name: Build ProjectStark.exe
         working-directory: Launcher/gui
+        shell: pwsh
         run: |
+          flutter --version
           flutter config --enable-windows-desktop
-          flutter pub get
-          flutter build windows --release
+          function Run-Step($label, $command) {
+            & cmd /c "$command 2>&1" | Tee-Object -FilePath "$label.log"
+            if ($LASTEXITCODE -ne 0) {
+              Get-Content "$label.log" | Select-String -Pattern 'error|Error|because|requires|failed|isn''t|not found' | Select-Object -First 20 | ForEach-Object { Write-Output "::error title=$label::$($_.Line)" }
+              exit 1
+            }
+          }
+          Run-Step "pub-get" "flutter pub get"
+          Run-Step "build" "flutter build windows --release"
 
       # 4. Put it all in one folder and zip it
       - name: Package
