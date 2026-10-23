@@ -12,11 +12,26 @@ Below are the key points about this project:
 4. **Stability Fixes**: The bus is now started on the game thread (fixes random crashes when pressing Start Bus), and bots that break are removed instead of crashing the server.
 5. **Lategame Enhancements**: Lategame improvements are planned for the future.
 
-## Installation
+## Quick Start (no building needed)
+
+You need three things:
+
+1. **Fortnite 14.60** game files (not included; Epic's files can't be shared here).
+2. **Reboot Launcher** from its official releases page: https://github.com/Auties00/reboot_launcher/releases
+3. **ProjectStark.dll** from the [`Download`](Download) folder in this repo.
+
+Then in the Reboot Launcher:
+
+1. **Play** → Fortnite version → add your 14.60 folder.
+2. **Settings** → Internal files → Game server type **Custom** → Game server → pick `ProjectStark.dll`.
+3. **Host** → Start hosting, then **Play** → Launch Fortnite.
+4. In the Project Stark window, open **Bots** → Spawn bots, then Start Bus.
+
+## Building it yourself
 
 1. Clone this repository.
 2. Build the project with Visual Studio 2022 (**Release | x64**).
-3. Run the server using the Reboot Launcher: Settings → Internal files → Game server type **Custom**, and point "Game server" at the built `x64\Release\Project Reboot 3.0.dll`.
+3. Use your built DLL the same way as above: Settings → Internal files → Game server type **Custom**, and point "Game server" at the built `x64\Release\Project Reboot 3.0.dll`.
 
 ## Contributing
 
