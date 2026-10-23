@@ -35,8 +35,8 @@ Then in the Reboot Launcher:
 
 ## Planned
 
-- [ ] Project Stark Launcher (a themed version of Reboot Launcher) that you start from a desktop shortcut
-- [ ] Lobby locker saves between game restarts (skin, pickaxe, glider, emotes)
+- [x] Project Stark Launcher (a themed version of Reboot Launcher) in [`Launcher`](Launcher/STARK_BUILD.md), started from a desktop shortcut
+- [x] Lobby locker saves between game restarts (skin, pickaxe, glider, emotes), in the Project Stark Launcher
 - [ ] Your locker skin carries into the match instead of turning into a default
 - [ ] Bot gun animations (weapons properly equipped on the bots)
 - [ ] Party/join system so friends can join the host without Radmin VPN
