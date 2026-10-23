@@ -5,6 +5,7 @@
 //
 //  - Build sensitivity: mouse sensitivity multiplier while holding the building tool
 //  - Edit sensitivity:  mouse sensitivity multiplier while editing
+//  - Reset on release:  while editing, letting go of your reset key confirms the edit for you
 //
 // Settings live in %LOCALAPPDATA%\ProjectStark\client_settings.ini (the launcher's Settings page writes it)
 // and are re-read every second, so you can change them while playing.
@@ -13,6 +14,7 @@
 #include <string>
 #include <atomic>
 #include <cmath>
+#include <algorithm>
 
 #include "reboot.h"
 #include "log.h"
@@ -26,6 +28,9 @@ namespace StarkClient
 	{
 		float BuildSens = 1.f;
 		float EditSens = 1.f;
+		bool bResetOnRelease = false;
+		int EditKey = 'G';             // virtual-key codes
+		int ResetKey = VK_RBUTTON;
 	};
 
 	inline FSettings Settings;
@@ -54,8 +59,42 @@ namespace StarkClient
 		return Result < 0.05f ? 0.05f : Result > 5.f ? 5.f : Result;
 	}
 
+	// "G", "F", "F1", "RightMouse", "Mouse4", "Space"... -> Windows virtual-key code
+	inline int KeyNameToVK(std::string Name, int Default)
+	{
+		for (auto& c : Name) c = (char)toupper((unsigned char)c);
+		Name.erase(std::remove(Name.begin(), Name.end(), ' '), Name.end());
+
+		if (Name.empty()) return Default;
+		if (Name.size() == 1 && ((Name[0] >= 'A' && Name[0] <= 'Z') || (Name[0] >= '0' && Name[0] <= '9'))) return Name[0];
+		if (Name[0] == 'F' && Name.size() <= 3 && isdigit((unsigned char)Name[1])) { int N = atoi(Name.c_str() + 1); if (N >= 1 && N <= 12) return VK_F1 + N - 1; }
+
+		if (Name == "LEFTMOUSE" || Name == "LMB" || Name == "MOUSE1") return VK_LBUTTON;
+		if (Name == "RIGHTMOUSE" || Name == "RMB" || Name == "MOUSE2") return VK_RBUTTON;
+		if (Name == "MIDDLEMOUSE" || Name == "MMB" || Name == "MOUSE3") return VK_MBUTTON;
+		if (Name == "MOUSE4" || Name == "THUMBMOUSEBUTTON") return VK_XBUTTON1;
+		if (Name == "MOUSE5" || Name == "THUMBMOUSEBUTTON2") return VK_XBUTTON2;
+		if (Name == "SPACE") return VK_SPACE;
+		if (Name == "SHIFT" || Name == "LEFTSHIFT") return VK_LSHIFT;
+		if (Name == "CTRL" || Name == "LEFTCTRL") return VK_LCONTROL;
+		if (Name == "ALT" || Name == "LEFTALT") return VK_LMENU;
+		if (Name == "TAB") return VK_TAB;
+		if (Name == "CAPSLOCK") return VK_CAPITAL;
+		return Default;
+	}
+
+	inline std::string ReadString(const char* Key, const char* Default)
+	{
+		char Value[64] = {};
+		GetPrivateProfileStringA("Client", Key, Default, Value, sizeof(Value), SettingsPath().c_str());
+		return Value;
+	}
+
 	inline void ReadSettings()
 	{
+		Settings.bResetOnRelease = ReadString("ResetOnRelease", "0") == std::string("1");
+		Settings.EditKey = KeyNameToVK(ReadString("EditKey", "G"), 'G');
+		Settings.ResetKey = KeyNameToVK(ReadString("ResetKey", "RightMouse"), VK_RBUTTON);
 		Settings.BuildSens = ReadFloat("BuildSensitivity", 1.f);
 		Settings.EditSens = ReadFloat("EditSensitivity", 1.f);
 	}
@@ -111,6 +150,87 @@ namespace StarkClient
 		return EMode::Normal;
 	}
 
+	// ---- Reset on release ----
+	inline bool bResetPressedWhileEditing = false;
+	inline bool bResetWasDown = false;
+	inline int PendingKeyUp = 0;
+	inline ULONGLONG PendingKeyUpTime = 0;
+
+	inline bool IsMouseVK(int VK) { return VK == VK_LBUTTON || VK == VK_RBUTTON || VK == VK_MBUTTON || VK == VK_XBUTTON1 || VK == VK_XBUTTON2; }
+
+	inline void SendKey(int VK, bool bDown)
+	{
+		INPUT Input = {};
+
+		if (IsMouseVK(VK))
+		{
+			Input.type = INPUT_MOUSE;
+			switch (VK)
+			{
+			case VK_LBUTTON: Input.mi.dwFlags = bDown ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_LEFTUP; break;
+			case VK_RBUTTON: Input.mi.dwFlags = bDown ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_RIGHTUP; break;
+			case VK_MBUTTON: Input.mi.dwFlags = bDown ? MOUSEEVENTF_MIDDLEDOWN : MOUSEEVENTF_MIDDLEUP; break;
+			default:
+				Input.mi.dwFlags = bDown ? MOUSEEVENTF_XDOWN : MOUSEEVENTF_XUP;
+				Input.mi.mouseData = VK == VK_XBUTTON1 ? XBUTTON1 : XBUTTON2;
+				break;
+			}
+		}
+		else
+		{
+			Input.type = INPUT_KEYBOARD;
+			Input.ki.wVk = (WORD)VK;
+			Input.ki.wScan = (WORD)MapVirtualKeyA(VK, MAPVK_VK_TO_VSC);
+			Input.ki.dwFlags = KEYEVENTF_SCANCODE | (bDown ? 0 : KEYEVENTF_KEYUP);
+		}
+
+		SendInput(1, &Input, sizeof(INPUT));
+	}
+
+	inline bool IsGameFocused()
+	{
+		DWORD Pid = 0;
+		GetWindowThreadProcessId(GetForegroundWindow(), &Pid);
+		return Pid == GetCurrentProcessId();
+	}
+
+	inline void TickResetOnRelease(bool bEditing)
+	{
+		auto Now = GetTickCount64();
+
+		// Finish a key tap we started last tick (games miss down+up sent in the same frame)
+		if (PendingKeyUp && Now - PendingKeyUpTime >= 40)
+		{
+			SendKey(PendingKeyUp, false);
+			PendingKeyUp = 0;
+		}
+
+		if (!Settings.bResetOnRelease || !IsGameFocused())
+		{
+			bResetPressedWhileEditing = false;
+			bResetWasDown = false;
+			return;
+		}
+
+		bool bResetDown = (GetAsyncKeyState(Settings.ResetKey) & 0x8000) != 0;
+
+		if (bEditing && bResetDown)
+			bResetPressedWhileEditing = true;
+
+		// Let go of reset while still editing -> confirm the edit by tapping the edit key
+		if (bResetWasDown && !bResetDown && bResetPressedWhileEditing && bEditing && !PendingKeyUp)
+		{
+			SendKey(Settings.EditKey, true);
+			PendingKeyUp = Settings.EditKey;
+			PendingKeyUpTime = Now;
+		}
+
+		if (!bResetDown || !bEditing)
+			bResetPressedWhileEditing = bResetDown && bEditing;
+
+		bResetWasDown = bResetDown;
+	}
+
 	inline void Tick()
 	{
 		auto Now = GetTickCount64();
@@ -135,13 +255,15 @@ namespace StarkClient
 		static auto AcknowledgedPawnOffset = PC->GetOffset("AcknowledgedPawn", false);
 		if (PlayerInputOffset == -1 || AcknowledgedPawnOffset == -1) return;
 
+		auto Mode = GetMode(PC->Get<UObject*>(AcknowledgedPawnOffset));
+
+		TickResetOnRelease(Mode == EMode::Edit);
+
 		auto PlayerInput = PC->Get<UObject*>(PlayerInputOffset);
 		if (!PlayerInput) return;
 
 		auto SensPtr = GetMouseXSensitivityPtr(PlayerInput);
 		if (!SensPtr) return;
-
-		auto Mode = GetMode(PC->Get<UObject*>(AcknowledgedPawnOffset));
 
 		if (Mode == EMode::Normal)
 		{
@@ -201,6 +323,6 @@ namespace StarkClient
 		MH_CreateHook((PVOID)Addresses::ProcessEvent, (PVOID)ProcessEventHook, (PVOID*)&ProcessEventOriginal);
 		MH_EnableHook((PVOID)Addresses::ProcessEvent);
 
-		LOG_INFO(LogInit, "[StarkClient] Running! Build sensitivity x{}, edit sensitivity x{}", Settings.BuildSens, Settings.EditSens);
+		LOG_INFO(LogInit, "[StarkClient] Running! Build sensitivity x{}, edit sensitivity x{}, reset on release {}", Settings.BuildSens, Settings.EditSens, Settings.bResetOnRelease);
 	}
 }

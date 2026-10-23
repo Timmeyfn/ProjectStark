@@ -12,20 +12,17 @@ Below are the key points about this project:
 4. **Stability Fixes**: The bus is now started on the game thread (fixes random crashes when pressing Start Bus), and bots that break are removed instead of crashing the server.
 5. **Lategame Enhancements**: Lategame improvements are planned for the future.
 
-## Quick Start (no building needed)
+## Quick Start (easiest)
 
-You need three things:
+1. Go to **[Releases](https://github.com/Timmeyfn/ProjectStark/releases/latest)** and download **ProjectStark.zip**.
+2. Extract it anywhere and run **ProjectStark.exe** (make a desktop shortcut if you like).
+3. **Play** tab: add your **Fortnite 14.60** folder (game files are not included; Epic's files can't be shared here).
+4. **Host** tab: Start hosting. Then **Play**: Launch Fortnite.
+5. In the Project Stark server window, open **Bots**, pick how many, then press Start Bus.
 
-1. **Fortnite 14.60** game files (not included; Epic's files can't be shared here).
-2. **Reboot Launcher** from its official releases page: https://github.com/Auties00/reboot_launcher/releases
-3. **ProjectStark.dll** from the [`Download`](Download) folder in this repo.
+Everything (launcher, login server and ProjectStark.dll) is built automatically by GitHub from this source code, so there's nothing to install.
 
-Then in the Reboot Launcher:
-
-1. **Play** → Fortnite version → add your 14.60 folder.
-2. **Settings** → Internal files → Game server type **Custom** → Game server → pick `ProjectStark.dll`.
-3. **Host** → Start hosting, then **Play** → Launch Fortnite.
-4. In the Project Stark window, open **Bots** → Spawn bots, then Start Bus.
+Settings → **Project Stark** has build/edit sensitivity and reset on release.
 
 ## Building it yourself
 

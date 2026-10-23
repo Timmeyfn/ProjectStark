@@ -167,6 +167,12 @@ class DllController extends GetxController {
           return (File(customGameServerDll.text), true);
         }
 
+        // Project Stark: use the ProjectStark.dll that ships next to ProjectStark.exe
+        final starkDll = File(path.join(path.dirname(Platform.resolvedExecutable), "ProjectStark.dll"));
+        if(starkDll.existsSync()) {
+          return (starkDll, true);
+        }
+
         return (_isS20(version) ? rebootAboveS20DllFile : rebootBeforeS20DllFile, false);
       case GameDll.console:
         final ue4ConsoleFile = File(unrealEngineConsoleDll.text);

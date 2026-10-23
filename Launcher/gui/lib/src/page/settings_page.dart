@@ -52,6 +52,9 @@ class _SettingsPageState extends AbstractPageState<SettingsPage> {
   // Project Stark client settings (read live by StarkClient.dll inside your game)
   double? _buildSens;
   double? _editSens;
+  bool _resetOnRelease = false;
+  final TextEditingController _editKey = TextEditingController(text: "G");
+  final TextEditingController _resetKey = TextEditingController(text: "RightMouse");
 
   File get _starkSettingsFile => File("${Platform.environment['LOCALAPPDATA']}\\ProjectStark\\client_settings.ini");
 
@@ -64,6 +67,9 @@ class _SettingsPageState extends AbstractPageState<SettingsPage> {
         final parts = line.split('=');
         if (parts.length != 2) continue;
         final value = double.tryParse(parts[1].trim());
+        if (parts[0].trim() == 'ResetOnRelease') _resetOnRelease = parts[1].trim() == '1';
+        if (parts[0].trim() == 'EditKey') _editKey.text = parts[1].trim();
+        if (parts[0].trim() == 'ResetKey') _resetKey.text = parts[1].trim();
         if (value == null) continue;
         if (parts[0].trim() == 'BuildSensitivity') _buildSens = value;
         if (parts[0].trim() == 'EditSensitivity') _editSens = value;
@@ -75,7 +81,8 @@ class _SettingsPageState extends AbstractPageState<SettingsPage> {
     try {
       _starkSettingsFile.parent.createSync(recursive: true);
       _starkSettingsFile.writeAsStringSync(
-          "[Client]\r\nBuildSensitivity=${_buildSens!.toStringAsFixed(2)}\r\nEditSensitivity=${_editSens!.toStringAsFixed(2)}\r\n");
+          "[Client]\r\nBuildSensitivity=${_buildSens!.toStringAsFixed(2)}\r\nEditSensitivity=${_editSens!.toStringAsFixed(2)}\r\n"
+          "ResetOnRelease=${_resetOnRelease ? 1 : 0}\r\nEditKey=${_editKey.text.trim()}\r\nResetKey=${_resetKey.text.trim()}\r\n");
     } catch (_) {}
   }
 
@@ -103,7 +110,7 @@ class _SettingsPageState extends AbstractPageState<SettingsPage> {
     return SettingTile(
       icon: Icon(FluentIcons.cursor_24_regular),
       title: const Text("Project Stark"),
-      subtitle: const Text("Build and edit sensitivity (works while you play)"),
+      subtitle: const Text("Build/edit sensitivity and reset on release (change them while you play)"),
       children: [
         SettingTile(
           icon: Icon(FluentIcons.building_24_regular),
@@ -118,6 +125,30 @@ class _SettingsPageState extends AbstractPageState<SettingsPage> {
           subtitle: const Text("Mouse sensitivity while editing"),
           contentWidth: 260.0,
           content: _starkSlider(_editSens!, (value) => _editSens = value),
+        ),
+        SettingTile(
+          icon: Icon(FluentIcons.arrow_reset_24_regular),
+          title: const Text("Reset on release"),
+          subtitle: const Text("While editing, letting go of your reset key confirms the edit for you"),
+          content: ToggleSwitch(
+            checked: _resetOnRelease,
+            onChanged: (value) {
+              setState(() => _resetOnRelease = value);
+              _saveStarkSettings();
+            },
+          ),
+        ),
+        SettingTile(
+          icon: Icon(FluentIcons.keyboard_24_regular),
+          title: const Text("Edit key"),
+          subtitle: const Text("Your Fortnite edit bind, e.g. G, F, Mouse4"),
+          content: TextBox(controller: _editKey, onChanged: (_) => _saveStarkSettings()),
+        ),
+        SettingTile(
+          icon: Icon(FluentIcons.keyboard_24_regular),
+          title: const Text("Reset key"),
+          subtitle: const Text("Your Fortnite reset-edit bind, e.g. RightMouse, R, Mouse5"),
+          content: TextBox(controller: _resetKey, onChanged: (_) => _saveStarkSettings()),
         ),
       ],
     );

@@ -1,0 +1,71 @@
+name: Build Project Stark
+
+# Builds everything on GitHub's Windows machines and publishes a ready-to-play zip
+# under Releases -> "Project Stark (latest)". Nobody needs Visual Studio, Flutter or Node.
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 1. The game server / client DLL
+      - uses: microsoft/setup-msbuild@v2
+      - name: Build ProjectStark.dll
+        run: msbuild "Project Reboot 3.0.sln" /m /p:Configuration=Release /p:Platform=x64
+
+      # 2. The login server (lawinserver.exe) with the locker-save fix
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Build lawinserver.exe
+        working-directory: Launcher/auth_backend
+        run: |
+          npm install
+          npx --yes @yao-pkg/pkg index.js --targets node20-win-x64 --output ..\gui\assets\backend\lawinserver.exe
+
+      # 3. The launcher
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - name: Build ProjectStark.exe
+        working-directory: Launcher/gui
+        run: |
+          flutter config --enable-windows-desktop
+          flutter pub get
+          flutter build windows --release
+
+      # 4. Put it all in one folder and zip it
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist\ProjectStark | Out-Null
+          Copy-Item -Recurse -Force Launcher\gui\build\windows\x64\runner\Release\* dist\ProjectStark\
+          Copy-Item -Force "x64\Release\Project Reboot 3.0.dll" dist\ProjectStark\ProjectStark.dll
+          Copy-Item -Force "x64\Release\Project Reboot 3.0.dll" Download\ProjectStark.dll
+          Compress-Archive -Path dist\ProjectStark -DestinationPath ProjectStark.zip -Force
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ProjectStark
+          path: ProjectStark.zip
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Project Stark (latest)
+          make_latest: true
+          body: |
+            Download **ProjectStark.zip**, extract it anywhere, and run **ProjectStark.exe**.
+            You still need your own Fortnite 14.60 files (Play tab -> add your 14.60 folder).
+            Built automatically from commit ${{ github.sha }}.
+          files: ProjectStark.zip
