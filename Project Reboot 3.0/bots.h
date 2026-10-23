@@ -2240,8 +2240,21 @@ namespace Bots
 			if (MemberOffsets::FortPlayerStateAthena::TeamKillScore > 0)
 				KillerState->Get<int>(MemberOffsets::FortPlayerStateAthena::TeamKillScore)++;
 
+			static auto OnRep_TeamKillScoreFn = BotFindFn(L"/Script/FortniteGame.FortPlayerStateAthena.OnRep_TeamKillScore");
+			if (OnRep_TeamKillScoreFn) KillerState->ProcessEvent(OnRep_TeamKillScoreFn);
+
 			if (DeadState)
-				KillerState->ClientReportKill(DeadState);
+				KillerState->ClientReportKill(DeadState); // the red "ELIMINATED <name>" on the killer's screen
+
+			static auto ClientReportTeamKillFn = BotFindFn(L"/Script/FortniteGame.FortPlayerStateAthena.ClientReportTeamKill");
+			if (ClientReportTeamKillFn && MemberOffsets::FortPlayerStateAthena::KillScore > 0)
+			{
+				int TeamKills = KillerState->Get<int>(MemberOffsets::FortPlayerStateAthena::KillScore);
+				KillerState->ProcessEvent(ClientReportTeamKillFn, &TeamKills);
+			}
+
+			static auto OnRep_KillsFn = BotFindFn(L"/Script/FortniteGame.FortPlayerStateAthena.OnRep_Kills");
+			if (OnRep_KillsFn) KillerState->ProcessEvent(OnRep_KillsFn);
 
 			auto KillerBot = KillerController ? FindBotByPawn(KillerController->GetPawn()) : nullptr;
 
@@ -2265,6 +2278,44 @@ namespace Bots
 			AActor* FinisherOrDowner = KillerState ? (AActor*)KillerState : (AActor*)DeadState;
 
 			*(bool*)(__int64(DeathInfo) + MemberOffsets::DeathInfo::bDBNO) = false;
+
+			// What killed us, so the kill feed shows the right weapon icon instead of the storm
+			{
+				static auto DeathCauseEnum = FindObject<UEnum>(L"/Script/FortniteGame.EDeathCause");
+				std::string CauseName = "OutsideSafeZone";
+
+				if (KillerState)
+				{
+					CauseName = "Rifle";
+					auto KillerPawn = KillerController ? Cast<AFortPawn>(KillerController->GetPawn()) : nullptr;
+					auto KillerWeapon = IsActorUsable(KillerPawn) ? KillerPawn->GetCurrentWeapon() : nullptr;
+					auto KillerWeaponDef = KillerWeapon ? KillerWeapon->GetWeaponData<UObject>() : nullptr;
+
+					switch (KillerWeaponDef ? ClassifyWeapon(KillerWeaponDef) : EBotWeaponKind::Assault)
+					{
+					case EBotWeaponKind::Pickaxe: CauseName = "Melee"; break;
+					case EBotWeaponKind::SMG: CauseName = "SMG"; break;
+					case EBotWeaponKind::Shotgun: CauseName = "Shotgun"; break;
+					case EBotWeaponKind::Pistol: CauseName = "Pistol"; break;
+					case EBotWeaponKind::Sniper: CauseName = "Sniper"; break;
+					default: break;
+					}
+				}
+				else
+				{
+					auto Zone = GetSafeZone();
+					bool bInStorm = Zone.bValid && BotMath::Dist2D(DeathLocation, Zone.Center) > Zone.Radius;
+					if (!bInStorm) CauseName = "FallDamage";
+				}
+
+				auto Value = DeathCauseEnum ? DeathCauseEnum->GetValue(CauseName) : -1;
+				if (Value >= 0 && MemberOffsets::DeathInfo::DeathCause != -1)
+					*(uint8*)(__int64(DeathInfo) + MemberOffsets::DeathInfo::DeathCause) = (uint8)Value;
+
+				static auto DownerOffset = FindOffsetStruct("/Script/FortniteGame.DeathInfo", "Downer", false);
+				if (DownerOffset != -1 && KillerState)
+					*(AActor**)(__int64(DeathInfo) + DownerOffset) = KillerState;
+			}
 
 			if (!MemberOffsets::DeathInfo::bIsWeakFinisherOrDowner)
 				*(AActor**)(__int64(DeathInfo) + MemberOffsets::DeathInfo::FinisherOrDowner) = FinisherOrDowner;
@@ -3440,6 +3491,30 @@ namespace Bots
 			{
 				Bot->State = EBotState::Dead;
 				BotSettings::AliveBots--;
+			}
+		}
+
+		// Fortnite's bot spawner also counts each bot as a player, so recount instead of trusting ++/--
+		static float LastRecount = 0.f;
+
+		if (Now - LastRecount > 1.f)
+		{
+			LastRecount = Now;
+			auto GameMode = Cast<AFortGameModeAthena>(World->GetGameMode());
+
+			if (GameMode)
+			{
+				int Alive = GameMode->GetAlivePlayers().Num();
+
+				for (auto Bot : AllPlayerBotsToTick)
+					if (Bot && !Bot->bBroken && Bot->State != EBotState::Dead)
+						Alive++;
+
+				if (GameState->GetPlayersLeft() != Alive)
+				{
+					GameState->GetPlayersLeft() = Alive;
+					GameState->OnRep_PlayersLeft();
+				}
 			}
 		}
 	}
