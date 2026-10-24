@@ -1,3 +1,5 @@
+<img src="Images/stark_logo.png" width="96" align="right">
+
 # Project Stark
 
 Project Stark is a game server for Fortnite, built on top of [Project Reboot 3.0](https://github.com/Milxnor/Project-Reboot-3.0) by Milxnor.
@@ -35,7 +37,7 @@ Settings → **Project Stark** has build/edit sensitivity and reset on release.
 - [x] Project Stark Launcher (a themed version of Reboot Launcher) in [`Launcher`](Launcher/STARK_BUILD.md), started from a desktop shortcut
 - [x] Lobby locker saves between game restarts (skin, pickaxe, glider, emotes), in the Project Stark Launcher
 - [ ] Your locker skin carries into the match instead of turning into a default
-- [ ] Project Stark Launcher uses Timmeyfn's own logo/icon instead of Reboot's
+- [x] Project Stark Launcher has its own logo/icon instead of Reboot's
 - [ ] Bot gun animations (weapons properly equipped on the bots)
 - [ ] Party/join system so friends can join the host without Radmin VPN
 - [ ] Client settings: Edit/Reset on release (Edit only / Edit & Reset / Reset only), build and edit sensitivity
