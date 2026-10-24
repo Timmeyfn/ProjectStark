@@ -164,6 +164,64 @@ namespace StarkClient
 		PlayerInput->ProcessEvent(Fn, &Value);
 	}
 
+	// ---- Fortnite's own sensitivity setting (FortClientSettingsRecord) ----
+	inline float BaseX = -1.f, BaseY = -1.f;
+
+	inline std::string ReadIni(const char* Key, const char* Default)
+	{
+		char Value[64] = {};
+		GetPrivateProfileStringA("Client", Key, Default, Value, sizeof(Value), SettingsPath().c_str());
+		return Value;
+	}
+
+	inline void WriteIni(const char* Key, const char* Value)
+	{
+		WritePrivateProfileStringA("Client", Key, Value, SettingsPath().c_str());
+	}
+
+	inline UObject* GetSettingsRecord()
+	{
+		static UObject* Cached = nullptr;
+		static ULONGLONG LastSearch = 0;
+
+		if (Cached && Cached->IsValidLowLevel())
+			return Cached;
+
+		auto Now = GetTickCount64();
+		if (Now - LastSearch < 2000) return nullptr;
+		LastSearch = Now;
+
+		static auto RecordClass = FindObject<UClass>(L"/Script/FortniteGame.FortClientSettingsRecord");
+		if (!RecordClass) return nullptr;
+
+		for (auto Record : GetAllObjectsOfClass(RecordClass))
+		{
+			if (Record && !Record->GetName().starts_with("Default__"))
+			{
+				Cached = Record;
+				LOG_INFO(LogInit, "[StarkClient] Found your settings: {}", Record->GetFullName());
+				break;
+			}
+		}
+
+		return Cached;
+	}
+
+	inline float GetRecordFloat(UObject* Record, const wchar_t* FnPath)
+	{
+		auto Fn = FindObject<UFunction>(FnPath);
+		struct { float ReturnValue = 0.f; uint8 Padding[16]; } Params;
+		if (Fn) Record->ProcessEvent(Fn, &Params);
+		return Params.ReturnValue;
+	}
+
+	inline void SetRecordFloat(UObject* Record, const wchar_t* FnPath, float Value)
+	{
+		auto Fn = FindObject<UFunction>(FnPath);
+		struct { float Value; uint8 Padding[16]; } Params{ Value };
+		if (Fn) Record->ProcessEvent(Fn, &Params);
+	}
+
 	inline EMode GetMode(UObject* Pawn)
 	{
 		if (!Pawn) return EMode::Normal;
@@ -330,32 +388,76 @@ namespace StarkClient
 
 		bEditingNow = Mode == EMode::Edit;
 
-		auto PlayerInput = PC->Get<UObject*>(PlayerInputOffset);
-		if (!PlayerInput) return;
+		auto Record = GetSettingsRecord();
+		if (!Record) return;
 
-		auto SensPtr = GetMouseXSensitivityPtr(PlayerInput);
-		if (!SensPtr) return;
+		float CurrentX = GetRecordFloat(Record, L"/Script/FortniteGame.FortClientSettingsRecord.GetMouseSensitivityX");
+		float CurrentY = GetRecordFloat(Record, L"/Script/FortniteGame.FortClientSettingsRecord.GetMouseSensitivityY");
+
+		// Last time the game closed while we had build/edit sens on: put the real sensitivity back
+		static bool bCheckedLeftover = false;
+
+		if (!bCheckedLeftover)
+		{
+			bCheckedLeftover = true;
+
+			if (ReadIni("SensApplied", "0") == "1")
+			{
+				float SavedX = (float)atof(ReadIni("SavedBaseX", "0").c_str());
+				float SavedY = (float)atof(ReadIni("SavedBaseY", "0").c_str());
+
+				if (SavedX > 0.f && SavedY > 0.f)
+				{
+					SetRecordFloat(Record, L"/Script/FortniteGame.FortClientSettingsRecord.SetMouseSensitivityX", SavedX);
+					SetRecordFloat(Record, L"/Script/FortniteGame.FortClientSettingsRecord.SetMouseSensitivityY", SavedY);
+					CurrentX = SavedX; CurrentY = SavedY;
+				}
+
+				WriteIni("SensApplied", "0");
+			}
+		}
 
 		if (Mode == EMode::Normal)
 		{
-			if (AppliedMode != EMode::Normal && BaseSensitivity > 0.f)
-				SetMouseSensitivity(PlayerInput, BaseSensitivity); // back to normal
+			if (AppliedMode != EMode::Normal && BaseX > 0.f)
+			{
+				// back to normal
+				SetRecordFloat(Record, L"/Script/FortniteGame.FortClientSettingsRecord.SetMouseSensitivityX", BaseX);
+				SetRecordFloat(Record, L"/Script/FortniteGame.FortClientSettingsRecord.SetMouseSensitivityY", BaseY);
+				WriteIni("SensApplied", "0");
+			}
+			else
+			{
+				BaseX = CurrentX; // keep up with changes in Fortnite's own settings
+				BaseY = CurrentY;
+			}
 
 			AppliedMode = EMode::Normal;
-			BaseSensitivity = *SensPtr; // keep up with changes from Fortnite's own settings
 			return;
 		}
 
-		if (BaseSensitivity <= 0.f)
-			BaseSensitivity = *SensPtr;
+		if (BaseX <= 0.f) { BaseX = CurrentX; BaseY = CurrentY; }
 
 		float Multiplier = Mode == EMode::Build ? Settings.BuildSens : Settings.EditSens;
-		float Wanted = BaseSensitivity * Multiplier;
+		float WantedX = BaseX * Multiplier, WantedY = BaseY * Multiplier;
 
-		if (AppliedMode != Mode || std::fabs(*SensPtr - Wanted) > 0.0001f)
+		if (AppliedMode != Mode || std::fabs(CurrentX - WantedX) > 0.0001f || std::fabs(CurrentY - WantedY) > 0.0001f)
 		{
-			SetMouseSensitivity(PlayerInput, Wanted);
+			if (AppliedMode == EMode::Normal)
+			{
+				char Buffer[32];
+				sprintf_s(Buffer, "%f", BaseX); WriteIni("SavedBaseX", Buffer);
+				sprintf_s(Buffer, "%f", BaseY); WriteIni("SavedBaseY", Buffer);
+				WriteIni("SensApplied", "1");
+			}
+
+			SetRecordFloat(Record, L"/Script/FortniteGame.FortClientSettingsRecord.SetMouseSensitivityX", WantedX);
+			SetRecordFloat(Record, L"/Script/FortniteGame.FortClientSettingsRecord.SetMouseSensitivityY", WantedY);
 			AppliedMode = Mode;
+
+			static int Logged = 0;
+			if (Logged++ < 3)
+				LOG_INFO(LogInit, "[StarkClient] {} sensitivity: {} -> {}", Mode == EMode::Build ? "Build" : "Edit", BaseX, WantedX);
 		}
 	}
 
