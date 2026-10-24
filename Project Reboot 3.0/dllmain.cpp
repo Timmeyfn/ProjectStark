@@ -916,9 +916,41 @@ static bool IsStarkClient()
     return Name.find("starkclient") != std::string::npos;
 }
 
+// The game server (host) is started with -nosplash -nosound (and -nullrhi when headless)
+static bool IsHostProcess()
+{
+    std::string CommandLine = GetCommandLineA();
+    for (auto& c : CommandLine) c = (char)tolower((unsigned char)c);
+    return CommandLine.find("-nullrhi") != std::string::npos
+        || (CommandLine.find("-nosplash") != std::string::npos && CommandLine.find("-nosound") != std::string::npos);
+}
+
+static std::string StarkServerMutexName()
+{
+    return "Local\\ProjectStarkServer_" + std::to_string(GetCurrentProcessId());
+}
+
 DWORD WINAPI Main(LPVOID)
 {
-    const bool bStarkClient = IsStarkClient();
+    bool bStarkClient = IsStarkClient();
+
+    // StarkClient.dll ended up in the server (some launchers inject the console DLL there too):
+    // stay out of the way if the real server DLL is running, otherwise be the server ourselves.
+    if (bStarkClient && IsHostProcess())
+    {
+        Sleep(5000);
+
+        if (auto Existing = OpenMutexA(SYNCHRONIZE, FALSE, StarkServerMutexName().c_str()))
+        {
+            CloseHandle(Existing);
+            return 0;
+        }
+
+        bStarkClient = false;
+    }
+
+    if (!bStarkClient)
+        CreateMutexA(nullptr, FALSE, StarkServerMutexName().c_str());
 
     if (bStarkClient)
         GStarkLogName = "stark_client.log";
