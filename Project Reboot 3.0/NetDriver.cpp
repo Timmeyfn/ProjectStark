@@ -72,6 +72,19 @@ void UNetDriver::TickFlushHook(UNetDriver* NetDriver)
 		}
 	}
 
+	if (BotSettings::bPendingApplySkin.exchange(false))
+	{
+		// "Apply skin" in the server window: put it on every player right now
+		if (auto GameMode = Cast<AFortGameModeAthena>(GetWorld()->GetGameMode()))
+		{
+			auto& AlivePlayers = GameMode->GetAlivePlayers();
+
+			for (int i = 0; i < AlivePlayers.Num(); ++i)
+				if (auto PlayerController = AlivePlayers.at(i))
+					PlayerController->ApplyCosmeticLoadout();
+		}
+	}
+
 	if (int Amount = BotSettings::PendingBotsToSpawn.exchange(0); Amount > 0)
 	{
 		Bots::SpawnBotsAtPlayerStarts(Amount);

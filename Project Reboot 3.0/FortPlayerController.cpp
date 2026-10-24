@@ -1,3 +1,5 @@
+#include "botsettings.h"
+#include "KismetTextLibrary.h"
 #include "FortPlayerController.h"
 
 #include "Rotator.h"
@@ -137,6 +139,40 @@ void AFortPlayerController::DropAllItems(const std::vector<UFortItemDefinition*>
 	WorldInventory->Update();
 }
 
+// Project Stark "Your skin": find a skin by its in-game name ("Travis Scott") or CID ("CID_441")
+static UObject* FindStarkSkin(std::string Wanted)
+{
+	auto Lower = [](std::string Str) { for (auto& c : Str) c = (char)tolower((unsigned char)c); return Str; };
+	Wanted = Lower(Wanted);
+
+	while (!Wanted.empty() && Wanted.back() == ' ') Wanted.pop_back();
+	while (!Wanted.empty() && Wanted.front() == ' ') Wanted.erase(Wanted.begin());
+
+	if (Wanted.empty())
+		return nullptr;
+
+	static std::vector<std::pair<std::string, UObject*>> Skins; // (lowercase display name, CID)
+
+	if (Skins.empty())
+	{
+		static auto CIDClass = FindObject<UClass>(L"/Script/FortniteGame.AthenaCharacterItemDefinition");
+
+		for (auto CID : GetAllObjectsOfClass(CIDClass))
+		{
+			if (!CID) continue;
+			static auto DisplayNameOffset = CID->GetOffset("DisplayName");
+			FString DisplayName = UKismetTextLibrary::Conv_TextToString(CID->Get<FText>(DisplayNameOffset));
+			Skins.push_back({ DisplayName.Data.Data ? Lower(DisplayName.ToString()) : "", CID });
+		}
+	}
+
+	for (auto& [Name, CID] : Skins) if (Name == Wanted) return CID;                                   // exact name
+	for (auto& [Name, CID] : Skins) if (!Name.empty() && Name.find(Wanted) != std::string::npos) return CID; // part of name
+	for (auto& [Name, CID] : Skins) if (Lower(CID->GetName()).find(Wanted) != std::string::npos) return CID; // CID
+
+	return nullptr;
+}
+
 void AFortPlayerController::ApplyCosmeticLoadout()
 {
 	auto PlayerStateAsFort = Cast<AFortPlayerStateAthena>(GetPlayerState());
@@ -226,6 +262,19 @@ void AFortPlayerController::ApplyCosmeticLoadout()
 	// Project Stark: put the skin from your locker on your character (like OGS), so you don't turn into a default
 	if (auto PCLoadout = GetCosmeticLoadoutOffset() != -1 ? this->GetCosmeticLoadout() : nullptr)
 	{
+		auto WantedSkin = BotSettings::GetPlayerSkinName();
+
+		if (!WantedSkin.empty())
+		{
+			if (auto StarkSkin = FindStarkSkin(WantedSkin))
+			{
+				PCLoadout->GetCharacter() = StarkSkin;
+				LOG_INFO(LogCosmetics, "Your skin (from the server window): {}", StarkSkin->GetName());
+			}
+			else
+				LOG_WARN(LogCosmetics, "Couldn't find a skin called \"{}\"", WantedSkin);
+		}
+
 		auto LockerCharacter = PCLoadout->GetCharacter();
 		LOG_INFO(LogCosmetics, "Locker skin: {}", LockerCharacter ? LockerCharacter->GetName() : "none (the launcher didn't send one)");
 
@@ -239,6 +288,14 @@ void AFortPlayerController::ApplyCosmeticLoadout()
 	}
 
 	UFortKismetLibrary::StaticClass()->ProcessEvent(UpdatePlayerCustomCharacterPartsVisualizationFn, &PlayerStateAsFort);
+
+	// Make sure the chosen skin's parts are really on the character (same as Reboot does on older versions)
+	if (!BotSettings::GetPlayerSkinName().empty())
+	{
+		if (auto PCLoadout = GetCosmeticLoadoutOffset() != -1 ? this->GetCosmeticLoadout() : nullptr)
+			if (auto Character = PCLoadout->GetCharacter())
+				ApplyCID(PawnAsFort, Character, false);
+	}
 
 	static auto OnRep_CharacterDataFn = FindObject<UFunction>(L"/Script/FortniteGame.FortPlayerState.OnRep_CharacterData");
 	if (OnRep_CharacterDataFn) PlayerStateAsFort->ProcessEvent(OnRep_CharacterDataFn);

@@ -30,6 +30,7 @@
 #include "reboot.h"
 #include "botnames.h"
 #include "botsettings.h"
+#include "starkclientsettings.h"
 #include "FortGameModeAthena.h"
 #include "UnrealString.h"
 #include "KismetTextLibrary.h"
@@ -351,14 +352,30 @@ static inline void StaticUI()
 		if (!bStartedBus)
 		{
 			// Bots join the warmup lobby. Press the button while in warmup, before the bus starts.
-			static int BotsToAdd = 20;
+			// "Bots in game" is a total: pressing Spawn tops up to that number (it never adds on top).
+			static int BotsWanted = 20;
 
-			ImGui::SliderInt("Bots to add", &BotsToAdd, 1, 99);
+			ImGui::Text("Bots in game: %d", BotsWanted);
+			ImGui::SameLine();
+			if (ImGui::Button(" - ")) BotsWanted = (std::max)(1, BotsWanted - 1);
+			ImGui::SameLine();
+			if (ImGui::Button(" + ")) BotsWanted = (std::min)(99, BotsWanted + 1);
 
-			if (ImGui::Button(("Spawn " + std::to_string(BotsToAdd) + " bots").c_str()))
+			for (int Preset : { 10, 20, 30, 50, 99 })
 			{
-				BotSettings::PendingBotsToSpawn = BotsToAdd; // spawned on the game thread
+				ImGui::SameLine();
+				if (ImGui::Button(std::to_string(Preset).c_str())) BotsWanted = Preset;
 			}
+
+			int ToSpawn = BotsWanted - BotSettings::AliveBots.load();
+
+			if (ToSpawn > 0)
+			{
+				if (ImGui::Button(("Spawn " + std::to_string(ToSpawn) + " bots").c_str()))
+					BotSettings::PendingBotsToSpawn = ToSpawn; // spawned on the game thread
+			}
+			else
+				ImGui::Text("(%d bots already in)", BotSettings::AliveBots.load());
 
 			ImGui::SameLine();
 		}
@@ -375,6 +392,34 @@ static inline void StaticUI()
 		ImGui::SameLine();
 		ImGui::Checkbox("Bots emote", &BotSettings::bEmote);
 		ImGui::Checkbox("Use Fortnite's own bot AI (experimental, bots may stand still)", &BotSettings::bUseEpicAI);
+	}
+
+	if (ImGui::CollapsingHeader("Your skin", ImGuiTreeNodeFlags_DefaultOpen))
+	{
+		static char SkinBuffer[64] = {};
+		static bool bLoadedSkin = false;
+
+		if (!bLoadedSkin)
+		{
+			bLoadedSkin = true;
+			BotSettings::LoadPlayerSkinName();
+			strncpy_s(SkinBuffer, BotSettings::GetPlayerSkinName().c_str(), sizeof(SkinBuffer) - 1);
+		}
+
+		ImGui::Text("Type a skin name (like Travis Scott, Midas, Drift). Leave empty to use your locker.");
+		ImGui::InputText("Skin", SkinBuffer, sizeof(SkinBuffer));
+		ImGui::SameLine();
+
+		if (ImGui::Button("Apply skin"))
+		{
+			BotSettings::SetPlayerSkinName(SkinBuffer);
+			BotSettings::bPendingApplySkin = true; // done on the game thread
+		}
+	}
+
+	if (ImGui::CollapsingHeader("Your settings (build/edit sens, reset on release)"))
+	{
+		StarkClientSettingsUI();
 	}
 
 	ImGui::Checkbox("Infinite Ammo", &Globals::bInfiniteAmmo);

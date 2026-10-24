@@ -20,6 +20,7 @@
 #include "log.h"
 #include "addresses.h"
 #include "inc.h"
+#include "GameplayStatics.h"
 #include <MinHook/MinHook.h>
 
 namespace StarkClient
@@ -310,9 +311,25 @@ namespace StarkClient
 		return ProcessEventOriginal(Object, Function, Params);
 	}
 
+	// Same as Reboot's console DLL: give the game a working ` console, so StarkClient.dll
+	// can be picked as the "Unreal engine console" DLL in Reboot Launcher.
+	inline void SpawnConsole()
+	{
+		auto Engine = GetEngine();
+		if (!Engine) return;
+
+		auto GameViewport = Engine->Get("GameViewport");
+		if (!GameViewport) return;
+
+		auto ViewportConsolePtr = GameViewport->GetPtr("ViewportConsole");
+		if (ViewportConsolePtr && !*ViewportConsolePtr)
+			*ViewportConsolePtr = UGameplayStatics::SpawnObject(FindObject<UClass>(L"/Script/Engine.Console"), GameViewport);
+	}
+
 	inline void Start()
 	{
 		ReadSettings();
+		SpawnConsole();
 
 		if (!Addresses::ProcessEvent)
 		{

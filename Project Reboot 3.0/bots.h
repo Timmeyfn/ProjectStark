@@ -2258,6 +2258,18 @@ namespace Bots
 			static auto OnRep_KillsFn = BotFindFn(L"/Script/FortniteGame.FortPlayerStateAthena.OnRep_Kills");
 			if (OnRep_KillsFn) KillerState->ProcessEvent(OnRep_KillsFn);
 
+			// The big red "ELIMINATED <name>" on a real player's screen
+			static auto FortPCAthenaClass = FindObject<UClass>(L"/Script/FortniteGame.FortPlayerControllerAthena");
+			static auto ClientReceiveKillNotificationFn = BotFindFn(L"/Script/FortniteGame.FortPlayerControllerAthena.ClientReceiveKillNotification");
+
+			if (ClientReceiveKillNotificationFn && KillerController && FortPCAthenaClass && KillerController->IsA(FortPCAthenaClass) && DeadState)
+			{
+				struct { UObject* Killer; UObject* Killed; } Params{ KillerState, DeadState };
+				KillerController->ProcessEvent(ClientReceiveKillNotificationFn, &Params);
+			}
+
+			KillerState->ForceNetUpdate();
+
 			auto KillerBot = KillerController ? FindBotByPawn(KillerController->GetPawn()) : nullptr;
 
 			if (KillerBot)
@@ -2860,7 +2872,29 @@ namespace Bots
 			BotEngine::StopFire(Bot->Pawn);
 		}
 
-		float HitChance = BotMath::Lerp(0.2f, 0.65f, Skill) * BotMath::Clamp(1.2f - Distance / (Stats.Range * 1.3f), 0.15f, 1.f);
+		// Walls/builds in the way? Then the shot hits that, not the target.
+		{
+			FVector Eye = BotMath::Add(MyLocation, FVector(0, 0, 60.f));
+			FVector TargetChest = BotMath::Add(TargetLocation, FVector(0, 0, 40.f));
+			FVector Hit;
+
+			if (BotEngine::Trace(Bot->Pawn, Eye, TargetChest, &Hit) && BotMath::Dist(Hit, TargetChest) > 120.f)
+			{
+				// lost sight: needs to re-aim when it comes back
+				Bot->ReactionReadyTime = (std::max)(Bot->ReactionReadyTime, Now + BotMath::Lerp(0.8f, 0.25f, Skill));
+				return;
+			}
+		}
+
+		// Reaction time: a real player needs a moment to aim after spotting you
+		if (Now < Bot->ReactionReadyTime)
+			return;
+
+		float HitChance = BotMath::Lerp(0.08f, 0.45f, Skill) * BotMath::Clamp(1.15f - Distance / (Stats.Range * 1.2f), 0.1f, 1.f);
+
+		// Harder to hit someone who's moving
+		if (BotMath::Size2D(BotEngine::GetVelocity(Target)) > 300.f)
+			HitChance *= 0.7f;
 
 		if (Kind == EBotWeaponKind::Shotgun)
 			HitChance = BotMath::Clamp(HitChance * 1.4f, 0.f, 0.95f);
@@ -3012,6 +3046,11 @@ namespace Bots
 		}
 
 		Container->BounceContainer();
+
+		// Chests are "dormant" for networking; without this players never see that a bot opened it,
+		// so it looks closed but can't be opened.
+		static auto FlushNetDormancyFn = BotFindFn(L"/Script/Engine.Actor.FlushNetDormancy");
+		if (FlushNetDormancyFn) Container->ProcessEvent(FlushNetDormancyFn);
 		Container->ForceNetUpdate();
 
 		BotWorld::NextPickupRefresh = 0.f; // let everyone see the new loot
