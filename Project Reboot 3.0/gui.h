@@ -391,6 +391,8 @@ static inline void StaticUI()
 		ImGui::Checkbox("Bots loot", &BotSettings::bLoot);
 		ImGui::SameLine();
 		ImGui::Checkbox("Bots emote", &BotSettings::bEmote);
+		ImGui::SameLine();
+		ImGui::Checkbox("Bots build", &BotSettings::bBuild);
 		ImGui::Checkbox("Use Fortnite's own bot AI (experimental, bots may stand still)", &BotSettings::bUseEpicAI);
 	}
 

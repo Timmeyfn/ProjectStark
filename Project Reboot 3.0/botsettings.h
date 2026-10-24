@@ -22,6 +22,7 @@ namespace BotSettings
 	inline bool bFight = true;   // bots shoot at players and other bots
 	inline bool bLoot = true;    // bots open chests and pick up weapons/heals
 	inline bool bEmote = true;   // bots emote on spawn island
+	inline bool bBuild = true;   // bots build walls / box up when shot
 
 	// Experimental: let Fortnite's own bot AI ("Phoebe") control the bots instead of Reboot's.
 	// Needs navigation data that Reboot doesn't set up on most versions, so the bots usually just stand still.

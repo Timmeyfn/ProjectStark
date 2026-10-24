@@ -1227,6 +1227,9 @@ public:
 	FBotObjectRef LastDamagerControllerRef;
 	FBotObjectRef LastDamagerPlayerStateRef;
 	float LastDamagedTime = -100.f;
+	float LastHurtTime = -100.f;   // any damage at all (players' real shots too)
+	float NextBuildTime = 0.f;
+	int Materials = 0;             // wood for building
 	int Kills = 0;
 
 	float RespawnTime = 0.f;
@@ -2341,8 +2344,28 @@ namespace Bots
 
 			if (ClientReceiveKillNotificationFn && KillerController && FortPCAthenaClass && KillerController->IsA(FortPCAthenaClass) && DeadState)
 			{
-				struct { UObject* Killer; UObject* Killed; } Params{ KillerState, DeadState };
-				KillerController->ProcessEvent(ClientReceiveKillNotificationFn, &Params);
+				auto ParamNames = BotListFunctionParams(ClientReceiveKillNotificationFn);
+				static bool bLoggedParams = false;
+
+				if (!bLoggedParams)
+				{
+					bLoggedParams = true;
+					std::string Joined; for (auto& P : ParamNames) Joined += P + " ";
+					LOG_INFO(LogBots, "ClientReceiveKillNotification params: {}", Joined);
+				}
+
+				// First param = killer, second = who died (filled by their real offsets)
+				FBotCall Call(ClientReceiveKillNotificationFn);
+				UObject* Values[2] = { KillerState, DeadState };
+
+				for (int i = 0; i < (int)ParamNames.size() && i < 2; ++i)
+				{
+					int Offset = atoi(ParamNames[i].substr(ParamNames[i].find('@') + 1).c_str());
+					if (Offset >= 0 && Offset + 8 <= (int)Call.Buffer.size()) memcpy(Call.Buffer.data() + Offset, &Values[i], 8);
+				}
+
+				Call.Call(KillerController);
+				LOG_INFO(LogBots, "Sent elimination message to the killer.");
 			}
 
 			KillerState->ForceNetUpdate();
@@ -2677,6 +2700,7 @@ namespace Bots
 
 	inline void Land(PlayerBot* Bot)
 	{
+		Bot->Materials = (std::max)(Bot->Materials, 150); // like farming a bit on landing
 		Bot->State = EBotState::Ground;
 		Bot->Goal = EBotGoal::None;
 		Bot->Pawn->SetCanBeDamaged(true);
@@ -2799,12 +2823,109 @@ namespace Bots
 		return Best;
 	}
 
+	// ---- Building -------------------------------------------------------------------------------
+	// Bots put up real wood walls (same pieces players build). We don't know each piece's pivot, so
+	// spawn it, measure it, turn it so its flat side faces the attacker, then slide it into place.
+	inline bool GetBounds(AActor* Actor, FVector& Origin, FVector& Extent)
+	{
+		static auto Fn = BotFindFn(L"/Script/Engine.Actor.GetActorBounds");
+		if (!Fn) return false;
+
+		FBotCall Call(Fn);
+		Call.Set("bOnlyCollidingComponents", false);
+		Call.Call(Actor);
+		Origin = Call.Get<FVector>("Origin");
+		Extent = Call.Get<FVector>("BoxExtent");
+		return Extent.X > 1.f && Extent.Y > 1.f;
+	}
+
+	inline ABuildingSMActor* BuildWall(PlayerBot* Bot, const FVector& Center, const FVector& FaceDir)
+	{
+		static auto WallClass = FindObject<UClass>(L"/Game/Building/ActorBlueprints/Player/Wood/L1/PBWA_W1_Solid.PBWA_W1_Solid_C");
+
+		if (!WallClass || Bot->Materials < 10)
+			return nullptr;
+
+		float Yaw = std::round(BotMath::YawOf(FaceDir) / 90.f) * 90.f;
+		bool bFacingX = std::fabs(FaceDir.X) >= std::fabs(FaceDir.Y);
+
+		FTransform Transform{};
+		Transform.Translation = Center;
+		Transform.Rotation = FRotator{ 0.f, Yaw, 0.f }.Quaternion();
+		Transform.Scale3D = { 1, 1, 1 };
+
+		auto Wall = GetWorld()->SpawnActor<ABuildingSMActor>(WallClass, Transform, CreateSpawnParameters(ESpawnActorCollisionHandlingMethod::AlwaysSpawn));
+		if (!Wall) return nullptr;
+
+		FVector Origin, Extent;
+
+		if (GetBounds(Wall, Origin, Extent))
+		{
+			// Thin side should point at the attacker; if not, turn it 90 degrees and measure again
+			bool bThinAlongX = Extent.X < Extent.Y;
+
+			if (bThinAlongX != bFacingX)
+			{
+				Wall->TeleportTo(Wall->GetActorLocation(), FRotator{ 0.f, Yaw + 90.f, 0.f });
+				GetBounds(Wall, Origin, Extent);
+			}
+
+			// Slide it so its middle is where we want and its bottom is on the ground
+			FVector Offset = BotMath::Sub(Center, Origin);
+			Offset.Z = Center.Z - (Origin.Z - Extent.Z);
+			Wall->TeleportTo(BotMath::Add(Wall->GetActorLocation(), Offset), Wall->GetActorRotation());
+		}
+
+		Wall->SetPlayerPlaced(true);
+		Wall->InitializeBuildingActor(nullptr, Wall, true);
+		Wall->SetTeam(Bot->PlayerState->GetTeamIndex());
+
+		Bot->Materials -= 10;
+		return Wall;
+	}
+
+	// Called while fighting: when we get shot, put a wall up (or box up when hurt)
+	inline void TickBuilding(PlayerBot* Bot, const FVector& ThreatLocation, float Now)
+	{
+		if (!BotSettings::bBuild || Now < Bot->NextBuildTime || Now - Bot->LastHurtTime > 0.6f)
+			return;
+
+		float Skill = Bot->Skill01();
+		Bot->NextBuildTime = Now + BotMath::Lerp(3.5f, 1.0f, Skill) * BotMath::RandF(0.8f, 1.2f);
+
+		if (!BotMath::Chance(BotMath::Lerp(0.35f, 0.9f, Skill)))
+			return;
+
+		auto MyLocation = Bot->Location();
+		FVector Ground = MyLocation;
+		BotEngine::HeightAboveGround(Bot->Pawn, MyLocation, &Ground);
+
+		auto ToThreat = BotMath::Normal2D(BotMath::Sub(ThreatLocation, MyLocation));
+		float Health = Bot->Pawn->GetHealth() + Bot->Pawn->GetShield();
+
+		if (Health < 90.f && Bot->Materials >= 40)
+		{
+			// Box up: a wall on every side
+			for (float Turn : { 0.f, 90.f, 180.f, 270.f })
+			{
+				auto Dir = BotMath::DirFromYaw(BotMath::YawOf(ToThreat) + Turn);
+				BuildWall(Bot, BotMath::Add(FVector(MyLocation.X, MyLocation.Y, Ground.Z), BotMath::Mul(Dir, 260.f)), Dir);
+			}
+		}
+		else
+		{
+			BuildWall(Bot, BotMath::Add(FVector(MyLocation.X, MyLocation.Y, Ground.Z), BotMath::Mul(ToThreat, 260.f)), ToThreat);
+		}
+	}
+
 	inline void TickCombat(PlayerBot* Bot, AFortPawn* Target, float Now, float DeltaTime)
 	{
 		auto MyLocation = Bot->Location();
 		auto TargetLocation = Target->GetActorLocation();
 		float Distance = BotMath::Dist(MyLocation, TargetLocation);
 		float Skill = Bot->Skill01();
+
+		TickBuilding(Bot, TargetLocation, Now);
 
 		// Weapon choice for this range
 		if (Now >= Bot->ReloadUntil)
@@ -3114,6 +3235,7 @@ namespace Bots
 			return;
 
 		Container->SpawnLoot(Bot->Pawn);
+		Bot->Materials = (std::min)(Bot->Materials + 60, 999);
 		Container->SetBitfieldValue(bAlreadySearchedOffset, bAlreadySearchedFieldMask, true);
 
 		if (SearchBounceDataOffset != -1 && SearchAnimationCountOffset != -1)
@@ -3251,6 +3373,14 @@ namespace Bots
 		auto Target = Bot->TargetPawnRef.Get<AFortPawn>();
 
 		if (Target && (!IsActorUsable(Target) || Target->GetHealth() <= 0.f))
+		{
+			Bot->TargetPawnRef.Reset();
+			Target = nullptr;
+		}
+
+		// Only a pickaxe? Don't run across the map at someone with a gun: go loot instead
+		// (still swing if they're right next to us).
+		if (Target && !Bot->HasGun() && BotMath::Dist(Bot->Location(), Target->GetActorLocation()) > 450.f)
 		{
 			Bot->TargetPawnRef.Reset();
 			Target = nullptr;
@@ -3471,6 +3601,9 @@ namespace Bots
 		if (bPawnValid)
 		{
 			float Health = Bot->Pawn->GetHealth();
+
+			if (Bot->DiagLastHealth > 0.f && Health < Bot->DiagLastHealth - 0.5f)
+				Bot->LastHurtTime = Now;
 
 			if (Bot->DiagLastHealth > 0.f && Health < Bot->DiagLastHealth - 0.5f && Now - Bot->LastDamagedTime > 0.5f)
 			{

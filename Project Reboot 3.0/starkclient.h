@@ -226,69 +226,72 @@ namespace StarkClient
 		return Pid == GetCurrentProcessId();
 	}
 
-	inline void TickResetOnRelease(bool bEditing)
+	// Runs on its own thread every millisecond so the confirm happens almost instantly.
+	inline std::atomic<bool> bEditingNow = false;
+
+	inline void TapKey(int VK, int HoldMs)
 	{
-		auto Now = GetTickCount64();
+		SendKey(VK, true);
+		Sleep(HoldMs);
+		SendKey(VK, false);
+	}
 
-		// Finish a key tap we started last tick (games miss down+up sent in the same frame)
-		if (PendingKeyUp && Now - PendingKeyUpTime >= 40)
+	inline DWORD WINAPI ResetOnReleaseThread(LPVOID)
+	{
+		bool bResetWasDown = false;
+		bool bResetPressedWhileEditing = false;
+		int LastWheelDown = WheelDownCount.load(), LastWheelUp = WheelUpCount.load();
+
+		while (true)
 		{
-			SendKey(PendingKeyUp, false);
-			PendingKeyUp = 0;
-		}
+			Sleep(1);
 
-		if (!Settings.bResetOnRelease || !IsGameFocused())
-		{
-			bResetPressedWhileEditing = false;
-			bResetWasDown = false;
-			return;
-		}
+			bool bEditing = bEditingNow.load();
 
-		// Scroll wheel reset: each scroll while editing resets, then we confirm right after
-		if (Settings.ResetKey == VK_WHEELDOWN || Settings.ResetKey == VK_WHEELUP)
-		{
-			static int LastWheelCount = 0;
-			static ULONGLONG ConfirmAt = 0;
-			int WheelCount = Settings.ResetKey == VK_WHEELDOWN ? WheelDownCount.load() : WheelUpCount.load();
-
-			if (WheelCount != LastWheelCount)
+			if (!Settings.bResetOnRelease || !IsGameFocused())
 			{
-				LastWheelCount = WheelCount;
-				if (bEditing) ConfirmAt = Now + 60; // give the game a moment to apply the reset
+				bResetWasDown = bResetPressedWhileEditing = false;
+				LastWheelDown = WheelDownCount.load();
+				LastWheelUp = WheelUpCount.load();
+				continue;
 			}
 
-			if (ConfirmAt && Now >= ConfirmAt)
+			// Scroll wheel: a scroll while editing = reset, then confirm right away
+			if (Settings.ResetKey == VK_WHEELDOWN || Settings.ResetKey == VK_WHEELUP)
 			{
-				ConfirmAt = 0;
+				int& Last = Settings.ResetKey == VK_WHEELDOWN ? LastWheelDown : LastWheelUp;
+				int Count = Settings.ResetKey == VK_WHEELDOWN ? WheelDownCount.load() : WheelUpCount.load();
 
-				if (bEditing && !PendingKeyUp)
+				if (Count != Last)
 				{
-					SendKey(Settings.EditKey, true);
-					PendingKeyUp = Settings.EditKey;
-					PendingKeyUpTime = Now;
+					Last = Count;
+
+					if (bEditing)
+					{
+						Sleep(8); // one frame for the game to apply the reset
+						TapKey(Settings.EditKey, 12);
+					}
 				}
+
+				continue;
 			}
 
-			return;
+			bool bResetDown = (GetAsyncKeyState(Settings.ResetKey) & 0x8000) != 0;
+
+			if (bEditing && bResetDown)
+				bResetPressedWhileEditing = true;
+
+			// Let go of reset while editing -> confirm straight away
+			if (bResetWasDown && !bResetDown && bResetPressedWhileEditing && bEditing)
+				TapKey(Settings.EditKey, 12);
+
+			if (!bResetDown)
+				bResetPressedWhileEditing = false;
+
+			bResetWasDown = bResetDown;
 		}
 
-		bool bResetDown = (GetAsyncKeyState(Settings.ResetKey) & 0x8000) != 0;
-
-		if (bEditing && bResetDown)
-			bResetPressedWhileEditing = true;
-
-		// Let go of reset while still editing -> confirm the edit by tapping the edit key
-		if (bResetWasDown && !bResetDown && bResetPressedWhileEditing && bEditing && !PendingKeyUp)
-		{
-			SendKey(Settings.EditKey, true);
-			PendingKeyUp = Settings.EditKey;
-			PendingKeyUpTime = Now;
-		}
-
-		if (!bResetDown || !bEditing)
-			bResetPressedWhileEditing = bResetDown && bEditing;
-
-		bResetWasDown = bResetDown;
+		return 0;
 	}
 
 	inline void Tick()
@@ -317,7 +320,15 @@ namespace StarkClient
 
 		auto Mode = GetMode(PC->Get<UObject*>(AcknowledgedPawnOffset));
 
-		TickResetOnRelease(Mode == EMode::Edit);
+		if (Mode == EMode::Normal)
+		{
+			static auto IsInBuildModeFn = FindObject<UFunction>(L"/Script/FortniteGame.FortPlayerController.IsInBuildMode");
+			struct { bool ReturnValue = false; } BuildParams;
+			if (IsInBuildModeFn) PC->ProcessEvent(IsInBuildModeFn, &BuildParams);
+			if (BuildParams.ReturnValue) Mode = EMode::Build;
+		}
+
+		bEditingNow = Mode == EMode::Edit;
 
 		auto PlayerInput = PC->Get<UObject*>(PlayerInputOffset);
 		if (!PlayerInput) return;
@@ -357,7 +368,7 @@ namespace StarkClient
 		{
 			auto Now = GetTickCount64();
 
-			if (Now - LastTick >= 30)
+			if (Now - LastTick >= 10)
 			{
 				LastTick = Now;
 				bInTick = true;
@@ -390,6 +401,7 @@ namespace StarkClient
 		ReadSettings();
 		SpawnConsole();
 		CreateThread(nullptr, 0, MouseHookThread, nullptr, 0, nullptr);
+		CreateThread(nullptr, 0, ResetOnReleaseThread, nullptr, 0, nullptr);
 
 		if (!Addresses::ProcessEvent)
 		{
