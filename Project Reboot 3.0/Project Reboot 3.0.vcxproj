@@ -268,6 +268,7 @@
     <ClCompile Include="NetConnection.cpp" />
     <ClCompile Include="NetConnection.h" />
     <ClCompile Include="NetDriver.cpp" />
+    <ClCompile Include="starkfriends.cpp" />
     <ClCompile Include="NetworkObjectList.cpp" />
     <ClCompile Include="Object.cpp" />
     <ClCompile Include="objectviewer.cpp" />
@@ -310,6 +311,7 @@
     <ClInclude Include="botsettings.h" />
     <ClInclude Include="starkclient.h" />
     <ClInclude Include="starkclientsettings.h" />
+    <ClInclude Include="starkfriends.h" />
     <ClInclude Include="BP_IslandScripting.h" />
     <ClInclude Include="BuildingActor.h" />
     <ClInclude Include="BuildingContainer.h" />

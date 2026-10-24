@@ -31,6 +31,7 @@
 #include "botnames.h"
 #include "botsettings.h"
 #include "starkclientsettings.h"
+#include "starkfriends.h"
 #include "FortGameModeAthena.h"
 #include "UnrealString.h"
 #include "KismetTextLibrary.h"
@@ -417,6 +418,11 @@ static inline void StaticUI()
 			BotSettings::SetPlayerSkinName(SkinBuffer);
 			BotSettings::bPendingApplySkin = true; // done on the game thread
 		}
+	}
+
+	if (ImGui::CollapsingHeader("Play with friends", ImGuiTreeNodeFlags_DefaultOpen))
+	{
+		StarkFriendsUI();
 	}
 
 	if (ImGui::CollapsingHeader("Your settings (build/edit sens, reset on release)"))
