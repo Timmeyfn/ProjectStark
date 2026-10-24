@@ -2342,6 +2342,9 @@ namespace Bots
 			static auto FortPCAthenaClass = FindObject<UClass>(L"/Script/FortniteGame.FortPlayerControllerAthena");
 			static auto ClientReceiveKillNotificationFn = BotFindFn(L"/Script/FortniteGame.FortPlayerControllerAthena.ClientReceiveKillNotification");
 
+			if (!ClientReceiveKillNotificationFn || !KillerController || !DeadState)
+				LOG_INFO(LogBots, "No elimination message: fn {} controller {} dead {}", ClientReceiveKillNotificationFn != nullptr, KillerController != nullptr, DeadState != nullptr);
+
 			if (ClientReceiveKillNotificationFn && KillerController && FortPCAthenaClass && KillerController->IsA(FortPCAthenaClass) && DeadState)
 			{
 				auto ParamNames = BotListFunctionParams(ClientReceiveKillNotificationFn);
@@ -2369,6 +2372,9 @@ namespace Bots
 			}
 
 			KillerState->ForceNetUpdate();
+
+			if (!KillerController)
+				KillerController = Cast<AController>(KillerState->GetOwner());
 
 			auto KillerBot = KillerController ? FindBotByPawn(KillerController->GetPawn()) : nullptr;
 
@@ -2563,6 +2569,26 @@ namespace Bots
 	{
 		Bot->bHasLandingTarget = false;
 
+		// If the storm circle already exists (always in lategame), land inside it
+		auto Zone = GetSafeZone();
+
+		if (Zone.bValid && !BotWorld::Chests.empty())
+		{
+			std::vector<FVector> Inside;
+
+			for (auto& Chest : BotWorld::Chests)
+				if (BotMath::Dist2D(Chest.Location, Zone.NextCenter) < Zone.NextRadius * 0.8f)
+					Inside.push_back(Chest.Location);
+
+			if (!Inside.empty())
+				Bot->LandingTarget = Inside.at(BotMath::RandI(0, (int)Inside.size() - 1));
+			else
+				Bot->LandingTarget = BotMath::Add(Zone.NextCenter, BotMath::Mul(BotMath::DirFromYaw(BotMath::RandF(-180.f, 180.f)), BotMath::RandF(0.f, Zone.NextRadius * 0.6f)));
+
+			Bot->bHasLandingTarget = true;
+			return;
+		}
+
 		if (!BotWorld::Chests.empty())
 		{
 			// Land at a random chest; that puts bots at real named locations
@@ -2605,6 +2631,9 @@ namespace Bots
 
 	inline void JumpFromBus(PlayerBot* Bot, AActor* Aircraft, float Now)
 	{
+		if (GetSafeZone().bValid)
+			PickLandingTarget(Bot);
+
 		FVector BusLocation = Aircraft ? Aircraft->GetActorLocation() : BotMath::Add(Bot->LandingTarget, FVector(0, 0, 15000.f));
 		FVector JumpLocation = BotMath::Add(BusLocation, FVector(BotMath::RandF(-400.f, 400.f), BotMath::RandF(-400.f, 400.f), -700.f));
 
@@ -2638,6 +2667,9 @@ namespace Bots
 		Bot->Pawn->SetCanBeDamaged(false); // no fall damage surprises on the way down
 		BotEngine::ResetFallingHeight(Bot->Pawn);
 		BotEngine::KeepAwakeAndMoving(Bot->Controller, Bot->Pawn, true);
+		// The bus can swap our look/glider back to defaults: put ours back on before we fly
+		Bot->ApplyChosenCosmetics();
+
 		BotEngine::BeginSkydiving(Bot->Pawn);
 
 		Bot->CurrentYaw = Rotation.Yaw;
