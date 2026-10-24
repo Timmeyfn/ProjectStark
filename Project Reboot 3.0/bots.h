@@ -1212,6 +1212,13 @@ public:
 	float NextStormTick = 0.f;
 	float DiagLastHealth = -1.f; // for logging unexplained damage
 
+	// Cosmetics we picked, re-applied a few times because Fortnite's bot spawner can overwrite them
+	UObject* ChosenCID = nullptr;
+	UObject* ChosenGlider = nullptr;
+	UObject* ChosenPickaxe = nullptr;
+	float NextSkinReapply = 0.f;
+	int SkinReapplies = 0;
+
 	// Healing
 	float HealUntil = 0.f;
 	int HealingItemIndex = -1;
@@ -1383,8 +1390,9 @@ public:
 		return true;
 	}
 
-	void ApplyHeroToCharacterData(UObject* HeroType)
+	int ApplyHeroToCharacterData(UObject* HeroType)
 	{
+		int PartsSet = 0;
 		static auto CharacterDataOffset = PlayerState->GetOffset("CharacterData", false);
 		static auto PartsOffset = FindOffsetStruct("/Script/FortniteGame.CustomCharacterData", "Parts", false);
 		static auto SpecializationsOffset = HeroType->GetOffset("Specializations", false);
@@ -1392,7 +1400,7 @@ public:
 		static auto CustomCharacterPartClass = FindObject<UClass>(L"/Script/FortniteGame.CustomCharacterPart");
 
 		if (CharacterDataOffset == -1 || PartsOffset == -1 || SpecializationsOffset == -1)
-			return;
+			return 0;
 
 		auto Parts = (UObject**)(__int64(PlayerState) + CharacterDataOffset + PartsOffset);
 		auto& Specializations = HeroType->Get<TArray<TSoftObjectPtr<UObject>>>(SpecializationsOffset);
@@ -1414,64 +1422,133 @@ public:
 				if (PartTypeOffset == -1) continue;
 
 				uint8 Type = Part->Get<uint8>(PartTypeOffset);
-				if (Type < 7) Parts[Type] = Part; // EFortCustomPartType::NumTypes == 7
+				if (Type < 7) { Parts[Type] = Part; PartsSet++; } // EFortCustomPartType::NumTypes == 7
 			}
 		}
 
 		static auto OnRep_CharacterDataFn = BotFindFn(L"/Script/FortniteGame.FortPlayerState.OnRep_CharacterData");
 		if (OnRep_CharacterDataFn) PlayerState->ProcessEvent(OnRep_CharacterDataFn);
+		return PartsSet;
 	}
 
 	// Give the bot a random real skin the way OGS does: set the controller's and pawn's
 	// cosmetic loadout Character, OnRep it, and put the skin's parts in CharacterData.
+	static std::vector<UObject*> GetCosmeticPool(const wchar_t* ClassPath, const char* Prefix)
+	{
+		std::vector<UObject*> Result;
+		auto Class = FindObject<UClass>(ClassPath);
+		if (!Class) return Result;
+
+		for (auto Item : GetAllObjectsOfClass(Class))
+		{
+			if (!Item) continue;
+			auto ItemName = Item->GetName();
+
+			if (ItemName.starts_with(Prefix) && !ContainsI(ItemName, "NPC") && !ContainsI(ItemName, "Default") && !ContainsI(ItemName, "Henchman")
+				&& !ContainsI(ItemName, "Test") && !ContainsI(ItemName, "Random"))
+				Result.push_back(Item);
+		}
+
+		return Result;
+	}
+
+	// Put ChosenCID/ChosenGlider on the bot. Returns how many body parts the skin had.
+	int ApplyChosenCosmetics()
+	{
+		if (!ChosenCID)
+			return 0;
+
+		static auto LoadoutBCOffset = Controller->GetOffset("CosmeticLoadoutBC", false);
+		static auto GliderOffset = FindOffsetStruct("/Script/FortniteGame.FortAthenaLoadout", "Glider", false);
+
+		auto SetLoadout = [&](FFortAthenaLoadout* Loadout)
+		{
+			Loadout->GetCharacter() = ChosenCID;
+			if (ChosenPickaxe) Loadout->GetPickaxe() = ChosenPickaxe;
+			if (ChosenGlider && GliderOffset != -1) *(UObject**)(__int64(Loadout) + GliderOffset) = ChosenGlider;
+		};
+
+		if (LoadoutBCOffset != -1)
+			SetLoadout((FFortAthenaLoadout*)(__int64(Controller) + LoadoutBCOffset));
+
+		if (auto PawnLoadout = Pawn->GetCosmeticLoadout())
+		{
+			SetLoadout(PawnLoadout);
+			static auto OnRep_CosmeticLoadoutFn = BotFindFn(L"/Script/FortniteGame.FortPlayerPawn.OnRep_CosmeticLoadout");
+			if (OnRep_CosmeticLoadoutFn) Pawn->ProcessEvent(OnRep_CosmeticLoadoutFn);
+		}
+
+		static auto HeroDefinitionOffset = ChosenCID->GetOffset("HeroDefinition", false);
+		auto HeroDefinition = HeroDefinitionOffset != -1 ? ChosenCID->Get(HeroDefinitionOffset) : nullptr;
+
+		if (!HeroDefinition)
+			return 0;
+
+		static auto HeroTypeOffset = PlayerState->GetOffset("HeroType", false);
+		if (HeroTypeOffset != -1) PlayerState->Get(HeroTypeOffset) = HeroDefinition;
+		ApplyHID(Pawn, HeroDefinition, false);
+		int PartsSet = ApplyHeroToCharacterData(HeroDefinition);
+
+		Pawn->ForceNetUpdate();
+		PlayerState->ForceNetUpdate();
+		return PartsSet;
+	}
+
+	// Give the bot a random real skin + glider (pickaxe is picked in Initialize), the way OGS does it.
 	bool ApplyRandomCID()
 	{
-		static std::vector<UObject*> CIDs;
+		static std::vector<UObject*> CIDs = GetCosmeticPool(L"/Script/FortniteGame.AthenaCharacterItemDefinition", "CID_");
+		static std::vector<UObject*> Gliders = GetCosmeticPool(L"/Script/FortniteGame.AthenaGliderItemDefinition", "Glider_");
+		static bool bLogged = false;
 
-		if (CIDs.empty())
+		if (!bLogged)
 		{
-			static auto CIDClass = FindObject<UClass>(L"/Script/FortniteGame.AthenaCharacterItemDefinition");
-
-			for (auto CID : GetAllObjectsOfClass(CIDClass))
-			{
-				if (!CID) continue;
-				auto CIDName = CID->GetName();
-
-				if (CIDName.starts_with("CID_") && !ContainsI(CIDName, "NPC") && !ContainsI(CIDName, "Default") && !ContainsI(CIDName, "Henchman"))
-					CIDs.push_back(CID);
-			}
-
-			LOG_INFO(LogBots, "Bots can wear {} skins.", CIDs.size());
+			bLogged = true;
+			LOG_INFO(LogBots, "Bots can wear {} skins and {} gliders.", CIDs.size(), Gliders.size());
 		}
 
 		if (CIDs.empty())
 			return false;
 
-		auto CID = CIDs.at(BotMath::RandI(0, (int)CIDs.size() - 1));
+		if (!Gliders.empty())
+			ChosenGlider = Gliders.at(BotMath::RandI(0, (int)Gliders.size() - 1));
 
-		static auto LoadoutBCOffset = Controller->GetOffset("CosmeticLoadoutBC", false);
-		if (LoadoutBCOffset != -1)
-			((FFortAthenaLoadout*)(__int64(Controller) + LoadoutBCOffset))->GetCharacter() = CID;
-
-		if (auto PawnLoadout = Pawn->GetCosmeticLoadout())
+		// Some skins in the files have no body parts (unreleased/broken) and would show as a default,
+		// so keep trying until one actually has parts.
+		for (int Attempt = 0; Attempt < 15; ++Attempt)
 		{
-			PawnLoadout->GetCharacter() = CID;
-			static auto OnRep_CosmeticLoadoutFn = BotFindFn(L"/Script/FortniteGame.FortPlayerPawn.OnRep_CosmeticLoadout");
-			if (OnRep_CosmeticLoadoutFn) Pawn->ProcessEvent(OnRep_CosmeticLoadoutFn);
+			ChosenCID = CIDs.at(BotMath::RandI(0, (int)CIDs.size() - 1));
+
+			if (ApplyChosenCosmetics() >= 2)
+			{
+				NextSkinReapply = UGameplayStatics::GetTimeSeconds(GetWorld()) + 2.f;
+				SkinReapplies = 0;
+				return true;
+			}
 		}
 
-		static auto HeroDefinitionOffset = CID->GetOffset("HeroDefinition", false);
-		auto HeroDefinition = HeroDefinitionOffset != -1 ? CID->Get(HeroDefinitionOffset) : nullptr;
+		return ChosenCID != nullptr;
+	}
 
-		if (HeroDefinition)
+	// A random pickaxe instead of the default one
+	UFortItemDefinition* PickRandomPickaxeWeapon()
+	{
+		static std::vector<UObject*> Pickaxes = GetCosmeticPool(L"/Script/FortniteGame.AthenaPickaxeItemDefinition", "Pickaxe_");
+		static auto WeaponDefinitionOffset = FindOffsetStruct("/Script/FortniteGame.AthenaPickaxeItemDefinition", "WeaponDefinition", false);
+
+		for (int Attempt = 0; Attempt < 10 && !Pickaxes.empty() && WeaponDefinitionOffset != -1; ++Attempt)
 		{
-			static auto HeroTypeOffset = PlayerState->GetOffset("HeroType", false);
-			if (HeroTypeOffset != -1) PlayerState->Get(HeroTypeOffset) = HeroDefinition;
-			ApplyHID(Pawn, HeroDefinition, false);
-			ApplyHeroToCharacterData(HeroDefinition);
+			auto Pickaxe = Pickaxes.at(BotMath::RandI(0, (int)Pickaxes.size() - 1));
+			auto Weapon = *(UFortItemDefinition**)(__int64(Pickaxe) + WeaponDefinitionOffset);
+
+			if (Weapon)
+			{
+				ChosenPickaxe = Pickaxe;
+				return Weapon;
+			}
 		}
 
-		return true;
+		return FindObject<UFortItemDefinition>(L"/Game/Athena/Items/Weapons/WID_Harvest_Pickaxe_Athena_C_T01.WID_Harvest_Pickaxe_Athena_C_T01");
 	}
 
 	void ApplyCosmetics()
@@ -1631,7 +1708,7 @@ public:
 		if (PlayerAbilitySet && AbilitySystemComponent)
 			PlayerAbilitySet->GiveToAbilitySystem(AbilitySystemComponent);
 
-		GiveItem(FindObject<UFortItemDefinition>(L"/Game/Athena/Items/Weapons/WID_Harvest_Pickaxe_Athena_C_T01.WID_Harvest_Pickaxe_Athena_C_T01"), 1, 0);
+		GiveItem(PickRandomPickaxeWeapon(), 1, 0);
 
 		SetupNewPawn();
 
@@ -3336,6 +3413,14 @@ namespace Bots
 
 		auto GameState = Cast<AFortGameStateAthena>(GetWorld()->GetGameState());
 		auto Phase = GameState ? GameState->GetGamePhase() : EAthenaGamePhase::None;
+
+		// Fortnite's bot spawner sometimes puts the default look back on after we spawn, so re-apply ours
+		if (Bot->ChosenCID && Bot->SkinReapplies < 3 && Now >= Bot->NextSkinReapply && Bot->PawnRef.IsValid())
+		{
+			Bot->SkinReapplies++;
+			Bot->NextSkinReapply = Now + 3.f;
+			Bot->ApplyChosenCosmetics();
+		}
 
 		// Respawn in warmup like real players do
 		if (Bot->State == EBotState::WaitingToRespawn)

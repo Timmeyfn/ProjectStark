@@ -309,7 +309,7 @@ static inline void InputVector(const std::string& baseText, FVector* vec)
 }
 
 static int Width = 640;
-static int Height = 480;
+static int Height = 900; // Project Stark: taller so Start Bus is reachable
 
 static int Tab = 1;
 static int PlayerTab = -1;
@@ -394,7 +394,7 @@ static inline void StaticUI()
 		ImGui::Checkbox("Use Fortnite's own bot AI (experimental, bots may stand still)", &BotSettings::bUseEpicAI);
 	}
 
-	if (ImGui::CollapsingHeader("Your skin", ImGuiTreeNodeFlags_DefaultOpen))
+	if (ImGui::CollapsingHeader("Your skin (optional)"))
 	{
 		static char SkinBuffer[64] = {};
 		static bool bLoadedSkin = false;
@@ -1645,7 +1645,7 @@ static inline DWORD WINAPI GuiThread(LPVOID)
 	WNDCLASSEX wc = { sizeof(WNDCLASSEX), CS_CLASSDC, WndProc, 0L, 0L, GetModuleHandle(NULL), NULL, NULL, NULL, NULL, L"RebootClass", NULL };
 	::RegisterClassEx(&wc);
 
-	HWND hwnd = ::CreateWindowExW(0L,wc.lpszClassName,(L"Project Stark " + ([](double v) { std::wstringstream ss; ss << std::fixed << std::setprecision(2) << v; return ss.str(); })(Fortnite_Version) + L"  -  built " __DATE__ " " __TIME__).c_str(),(WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX), 100, 100, Width, Height, NULL, NULL, wc.hInstance, NULL);
+	HWND hwnd = ::CreateWindowExW(0L,wc.lpszClassName,(L"Project Stark " + ([](double v) { std::wstringstream ss; ss << std::fixed << std::setprecision(2) << v; return ss.str(); })(Fortnite_Version) + L"  -  built " __DATE__ " " __TIME__).c_str(),(WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_THICKFRAME), 100, 100, Width, Height, NULL, NULL, wc.hInstance, NULL);
 
 
 	if (hwnd == NULL)
