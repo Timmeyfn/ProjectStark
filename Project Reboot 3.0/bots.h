@@ -3570,6 +3570,17 @@ namespace Bots
 					GameState->GetPlayersLeft() = Alive;
 					GameState->OnRep_PlayersLeft();
 				}
+
+				// Fortnite's bot spawner also counts bots in PlayerBotsLeft, and the HUD adds both
+				// together (that's the "41 players" with 20 bots). Our count already has the bots.
+				static auto PlayerBotsLeftOffset = GameState->GetOffset("PlayerBotsLeft", false);
+
+				if (PlayerBotsLeftOffset != -1 && GameState->Get<int>(PlayerBotsLeftOffset) != 0)
+				{
+					GameState->Get<int>(PlayerBotsLeftOffset) = 0;
+					static auto OnRep_PlayerBotsLeftFn = BotFindFn(L"/Script/FortniteGame.FortGameStateAthena.OnRep_PlayerBotsLeft");
+					if (OnRep_PlayerBotsLeftFn) GameState->ProcessEvent(OnRep_PlayerBotsLeftFn);
+				}
 			}
 		}
 	}
