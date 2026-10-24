@@ -39,7 +39,8 @@ Settings → **Project Stark** has build/edit sensitivity and reset on release.
 - [ ] Your locker skin carries into the match instead of turning into a default
 - [x] Project Stark Launcher has its own logo/icon instead of Reboot's
 - [ ] Bot gun animations (weapons properly equipped on the bots)
-- [ ] Party/join system so friends can join the host without Radmin VPN
+- [x] Play with friends without Radmin VPN: the host's router port opens automatically (UPnP) and the server window shows the address to share
+- [ ] Friends list / party invites inside the launcher
 - [ ] Client settings: Edit/Reset on release (Edit only / Edit & Reset / Reset only), build and edit sensitivity
 
 ## Contributing
