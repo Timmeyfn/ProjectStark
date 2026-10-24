@@ -9,7 +9,7 @@ namespace Globals
 	extern inline bool bCreative = false;
 	extern inline bool bGoingToPlayEvent = false;
 	extern inline bool bEnableAGIDs = true;
-	extern inline bool bNoMCP = true;
+	extern inline bool bNoMCP = false; // Project Stark: off, so the server loads your locker (skin, pickaxe, backbling) from the launcher
 	extern inline bool bLogProcessEvent = false;
 	// extern inline bool bLateGame = false;
 	extern inline std::atomic<bool> bLateGame(false);

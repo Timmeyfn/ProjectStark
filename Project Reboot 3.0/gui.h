@@ -427,7 +427,7 @@ static inline void StaticUI()
 	
 	ImGui::Checkbox("Private IPs are operator", &Globals::bPrivateIPsAreOperator);
 
-	ImGui::Checkbox("No MCP (Don't change unless you know what this is)", &Globals::bNoMCP);
+	ImGui::Checkbox("No MCP (leave OFF so your locker skin/pickaxe/backbling load in game)", &Globals::bNoMCP);
 
 	if (Addresses::ApplyGadgetData && Addresses::RemoveGadgetData && Engine_Version < 424)
 	{
