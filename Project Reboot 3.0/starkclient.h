@@ -166,6 +166,7 @@ namespace StarkClient
 
 	// ---- Fortnite's own sensitivity setting (FortClientSettingsRecord) ----
 	inline float BaseX = -1.f, BaseY = -1.f;
+	inline float BaseYawScale = 0.f, BasePitchScale = 0.f;
 
 	inline std::string ReadIni(const char* Key, const char* Default)
 	{
@@ -388,76 +389,83 @@ namespace StarkClient
 
 		bEditingNow = Mode == EMode::Edit;
 
-		auto Record = GetSettingsRecord();
-		if (!Record) return;
-
-		float CurrentX = GetRecordFloat(Record, L"/Script/FortniteGame.FortClientSettingsRecord.GetMouseSensitivityX");
-		float CurrentY = GetRecordFloat(Record, L"/Script/FortniteGame.FortClientSettingsRecord.GetMouseSensitivityY");
-
-		// Last time the game closed while we had build/edit sens on: put the real sensitivity back
+		// Older test builds changed your saved mouse sensitivity; if one left it changed, put it back once
 		static bool bCheckedLeftover = false;
 
 		if (!bCheckedLeftover)
 		{
-			bCheckedLeftover = true;
-
-			if (ReadIni("SensApplied", "0") == "1")
+			if (auto Record = GetSettingsRecord())
 			{
-				float SavedX = (float)atof(ReadIni("SavedBaseX", "0").c_str());
-				float SavedY = (float)atof(ReadIni("SavedBaseY", "0").c_str());
+				bCheckedLeftover = true;
 
-				if (SavedX > 0.f && SavedY > 0.f)
+				if (ReadIni("SensApplied", "0") == "1")
 				{
-					SetRecordFloat(Record, L"/Script/FortniteGame.FortClientSettingsRecord.SetMouseSensitivityX", SavedX);
-					SetRecordFloat(Record, L"/Script/FortniteGame.FortClientSettingsRecord.SetMouseSensitivityY", SavedY);
-					CurrentX = SavedX; CurrentY = SavedY;
-				}
+					float SavedX = (float)atof(ReadIni("SavedBaseX", "0").c_str());
+					float SavedY = (float)atof(ReadIni("SavedBaseY", "0").c_str());
 
-				WriteIni("SensApplied", "0");
+					if (SavedX > 0.f && SavedY > 0.f)
+					{
+						SetRecordFloat(Record, L"/Script/FortniteGame.FortClientSettingsRecord.SetMouseSensitivityX", SavedX);
+						SetRecordFloat(Record, L"/Script/FortniteGame.FortClientSettingsRecord.SetMouseSensitivityY", SavedY);
+						LOG_INFO(LogInit, "[StarkClient] Restored your mouse sensitivity to {}", SavedX);
+					}
+
+					WriteIni("SensApplied", "0");
+				}
 			}
 		}
 
+		// The real fix: scale how far the camera turns per mouse movement, live (like Fortnite's
+		// build/edit sensitivity). Your saved mouse sensitivity is never touched.
+		static auto YawScaleOffset = PC->GetOffset("InputYawScale", false);
+		static auto PitchScaleOffset = PC->GetOffset("InputPitchScale", false);
+		static auto SetYawFn = FindObject<UFunction>(L"/Script/FortniteGame.FortPlayerController.SetInputYawScale");
+		static auto SetPitchFn = FindObject<UFunction>(L"/Script/FortniteGame.FortPlayerController.SetInputPitchScale");
+
+		if (YawScaleOffset == -1 || PitchScaleOffset == -1)
+		{
+			static bool bWarned = false;
+			if (!bWarned) { bWarned = true; LOG_ERROR(LogInit, "[StarkClient] Couldn't find InputYawScale/InputPitchScale, build/edit sensitivity is off."); }
+			return;
+		}
+
+		float& YawScale = PC->Get<float>(YawScaleOffset);
+		float& PitchScale = PC->Get<float>(PitchScaleOffset);
+
+		auto SetScales = [&](float Yaw, float Pitch)
+		{
+			struct { float Value; uint8 Padding[16]; } YawParams{ Yaw }, PitchParams{ Pitch };
+			if (SetYawFn) PC->ProcessEvent(SetYawFn, &YawParams); else YawScale = Yaw;
+			if (SetPitchFn) PC->ProcessEvent(SetPitchFn, &PitchParams); else PitchScale = Pitch;
+		};
+
 		if (Mode == EMode::Normal)
 		{
-			if (AppliedMode != EMode::Normal && BaseX > 0.f)
-			{
-				// back to normal
-				SetRecordFloat(Record, L"/Script/FortniteGame.FortClientSettingsRecord.SetMouseSensitivityX", BaseX);
-				SetRecordFloat(Record, L"/Script/FortniteGame.FortClientSettingsRecord.SetMouseSensitivityY", BaseY);
-				WriteIni("SensApplied", "0");
-			}
+			if (AppliedMode != EMode::Normal && BaseYawScale != 0.f)
+				SetScales(BaseYawScale, BasePitchScale); // back to normal
 			else
 			{
-				BaseX = CurrentX; // keep up with changes in Fortnite's own settings
-				BaseY = CurrentY;
+				BaseYawScale = YawScale; // keep up with anything Fortnite changes (e.g. on the bus)
+				BasePitchScale = PitchScale;
 			}
 
 			AppliedMode = EMode::Normal;
 			return;
 		}
 
-		if (BaseX <= 0.f) { BaseX = CurrentX; BaseY = CurrentY; }
+		if (BaseYawScale == 0.f) { BaseYawScale = YawScale; BasePitchScale = PitchScale; }
 
 		float Multiplier = Mode == EMode::Build ? Settings.BuildSens : Settings.EditSens;
-		float WantedX = BaseX * Multiplier, WantedY = BaseY * Multiplier;
+		float WantedYaw = BaseYawScale * Multiplier, WantedPitch = BasePitchScale * Multiplier;
 
-		if (AppliedMode != Mode || std::fabs(CurrentX - WantedX) > 0.0001f || std::fabs(CurrentY - WantedY) > 0.0001f)
+		if (AppliedMode != Mode || std::fabs(YawScale - WantedYaw) > 0.0001f || std::fabs(PitchScale - WantedPitch) > 0.0001f)
 		{
-			if (AppliedMode == EMode::Normal)
-			{
-				char Buffer[32];
-				sprintf_s(Buffer, "%f", BaseX); WriteIni("SavedBaseX", Buffer);
-				sprintf_s(Buffer, "%f", BaseY); WriteIni("SavedBaseY", Buffer);
-				WriteIni("SensApplied", "1");
-			}
-
-			SetRecordFloat(Record, L"/Script/FortniteGame.FortClientSettingsRecord.SetMouseSensitivityX", WantedX);
-			SetRecordFloat(Record, L"/Script/FortniteGame.FortClientSettingsRecord.SetMouseSensitivityY", WantedY);
+			SetScales(WantedYaw, WantedPitch);
 			AppliedMode = Mode;
 
 			static int Logged = 0;
 			if (Logged++ < 3)
-				LOG_INFO(LogInit, "[StarkClient] {} sensitivity: {} -> {}", Mode == EMode::Build ? "Build" : "Edit", BaseX, WantedX);
+				LOG_INFO(LogInit, "[StarkClient] {} sensitivity: turn scale {} -> {}", Mode == EMode::Build ? "Build" : "Edit", BaseYawScale, WantedYaw);
 		}
 	}
 
