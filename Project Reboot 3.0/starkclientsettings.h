@@ -80,7 +80,7 @@ inline void StarkClientSettingsUI()
 	if (ImGui::InputText("Edit key (e.g. G, F, Mouse4)", EditKey, sizeof(EditKey)))
 		StarkClientSettings::WriteString("EditKey", EditKey);
 
-	if (ImGui::InputText("Reset key (e.g. RightMouse, R, Mouse5)", ResetKey, sizeof(ResetKey)))
+	if (ImGui::InputText("Reset key (e.g. RightMouse, R, Mouse5, WheelDown)", ResetKey, sizeof(ResetKey)))
 		StarkClientSettings::WriteString("ResetKey", ResetKey);
 }
 #endif

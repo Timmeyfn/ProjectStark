@@ -147,7 +147,7 @@ class _SettingsPageState extends AbstractPageState<SettingsPage> {
         SettingTile(
           icon: Icon(FluentIcons.keyboard_24_regular),
           title: const Text("Reset key"),
-          subtitle: const Text("Your Fortnite reset-edit bind, e.g. RightMouse, R, Mouse5"),
+          subtitle: const Text("Your Fortnite reset-edit bind, e.g. RightMouse, R, Mouse5, WheelDown"),
           content: TextBox(controller: _resetKey, onChanged: (_) => _saveStarkSettings()),
         ),
       ],

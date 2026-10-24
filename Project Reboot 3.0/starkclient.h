@@ -60,6 +60,35 @@ namespace StarkClient
 		return Result < 0.05f ? 0.05f : Result > 5.f ? 5.f : Result;
 	}
 
+	// Scroll wheel isn't a real key, so it gets made-up codes
+	constexpr int VK_WHEELDOWN = 0x10001;
+	constexpr int VK_WHEELUP = 0x10002;
+
+	// Counted by a low-level mouse hook (the scroll wheel has no "held down" state to poll)
+	inline std::atomic<int> WheelDownCount = 0;
+	inline std::atomic<int> WheelUpCount = 0;
+
+	inline LRESULT CALLBACK MouseHookProc(int Code, WPARAM wParam, LPARAM lParam)
+	{
+		if (Code == HC_ACTION && wParam == WM_MOUSEWHEEL)
+		{
+			auto Info = (MSLLHOOKSTRUCT*)lParam;
+			short Delta = (short)HIWORD(Info->mouseData);
+			if (Delta < 0) WheelDownCount++;
+			else if (Delta > 0) WheelUpCount++;
+		}
+
+		return CallNextHookEx(nullptr, Code, wParam, lParam);
+	}
+
+	inline DWORD WINAPI MouseHookThread(LPVOID)
+	{
+		SetWindowsHookExA(WH_MOUSE_LL, MouseHookProc, GetModuleHandleA(nullptr), 0);
+		MSG Msg;
+		while (GetMessageA(&Msg, nullptr, 0, 0) > 0) { TranslateMessage(&Msg); DispatchMessageA(&Msg); }
+		return 0;
+	}
+
 	// "G", "F", "F1", "RightMouse", "Mouse4", "Space"... -> Windows virtual-key code
 	inline int KeyNameToVK(std::string Name, int Default)
 	{
@@ -67,6 +96,8 @@ namespace StarkClient
 		Name.erase(std::remove(Name.begin(), Name.end(), ' '), Name.end());
 
 		if (Name.empty()) return Default;
+		if (Name == "WHEELDOWN" || Name == "SCROLLDOWN" || Name == "MOUSEWHEELDOWN") return VK_WHEELDOWN;
+		if (Name == "WHEELUP" || Name == "SCROLLUP" || Name == "MOUSEWHEELUP") return VK_WHEELUP;
 		if (Name.size() == 1 && ((Name[0] >= 'A' && Name[0] <= 'Z') || (Name[0] >= '0' && Name[0] <= '9'))) return Name[0];
 		if (Name[0] == 'F' && Name.size() <= 3 && isdigit((unsigned char)Name[1])) { int N = atoi(Name.c_str() + 1); if (N >= 1 && N <= 12) return VK_F1 + N - 1; }
 
@@ -213,6 +244,34 @@ namespace StarkClient
 			return;
 		}
 
+		// Scroll wheel reset: each scroll while editing resets, then we confirm right after
+		if (Settings.ResetKey == VK_WHEELDOWN || Settings.ResetKey == VK_WHEELUP)
+		{
+			static int LastWheelCount = 0;
+			static ULONGLONG ConfirmAt = 0;
+			int WheelCount = Settings.ResetKey == VK_WHEELDOWN ? WheelDownCount.load() : WheelUpCount.load();
+
+			if (WheelCount != LastWheelCount)
+			{
+				LastWheelCount = WheelCount;
+				if (bEditing) ConfirmAt = Now + 60; // give the game a moment to apply the reset
+			}
+
+			if (ConfirmAt && Now >= ConfirmAt)
+			{
+				ConfirmAt = 0;
+
+				if (bEditing && !PendingKeyUp)
+				{
+					SendKey(Settings.EditKey, true);
+					PendingKeyUp = Settings.EditKey;
+					PendingKeyUpTime = Now;
+				}
+			}
+
+			return;
+		}
+
 		bool bResetDown = (GetAsyncKeyState(Settings.ResetKey) & 0x8000) != 0;
 
 		if (bEditing && bResetDown)
@@ -330,6 +389,7 @@ namespace StarkClient
 	{
 		ReadSettings();
 		SpawnConsole();
+		CreateThread(nullptr, 0, MouseHookThread, nullptr, 0, nullptr);
 
 		if (!Addresses::ProcessEvent)
 		{
